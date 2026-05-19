@@ -8,7 +8,7 @@ CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** �
 2. 在 OBS 中开始录制（推荐 `.mkv`）。
 3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
 
-当前版本重点修复：首房间不会再被初始 `load_level` 截掉，房间切换处不再重复保留同一段转场画面；最终成片默认放在 OBS 录制目录下的地图名子文件夹；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
+当前版本重点修复：首房间不会再被初始 `load_level` 截掉；有死亡的房间会保留本次进入房间到第一次死亡的片段，之后再接最终成功尝试；房间切换处不再重复保留同一段转场画面；最终成片默认放在 OBS 录制目录下的地图名子文件夹；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
 
 ---
 
@@ -119,6 +119,19 @@ helper 工作目录：
 - 下一个房间不会再把 pre-roll 回卷到上一个房间；
 - `clip_intervals.json` 会记录 `adjacent_room_overlap_trimmed`，表示相邻片段已去重对齐。
 
+死亡房间的保留规则：
+
+- 正常进房间的 `load_level(playerIntro=Transition)` 不会把房间开头截掉；
+- `death` / `load_end` 只标记本次尝试失败，不会再被当作成功片段起点；
+- `respawn` 或 `load_level(playerIntro=Respawn)` 才会作为死亡后成功尝试的起点；
+- 如果一个房间内发生死亡，会额外保留“本次进入房间 -> 第一次死亡”的片段，原因标记为 `room_entry_before_first_death`；
+- 分支房间或同名房间再次进入时按每次 `room_enter` 独立处理，不会把上一次访问同名房间的死亡尾巴接到本次成功片段前。
+
+最终拼接规则：
+
+- 精确模式会先把每个片段重编码成临时 segment；
+- 最终 concat 阶段也会重新编码一次，避免直接 stream copy 时继承异常视频时间戳，导致成片时长变长或播放到中途卡住。
+
 ---
 
 ## 关于存档
@@ -195,10 +208,17 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 ..\.dotnet\dotnet.exe publish .\CelesteAutoCut\CelesteAutoCut.csproj -c Release
 ```
 
+当前自测覆盖：
+
+- 首房间初始 `Transition load_level` 不截断房间开头；
+- 死亡房间保留“进入房间 -> 第一次死亡”，成功片段从 `Respawn` 开始而不是从 `death` 开始；
+- 分支后再次进入同名房间时，每次访问独立生成片段；
+- 精确拼接模式的最终 concat 会重新编码，避免输出视频时间戳异常膨胀。
+
 真实环境脚本：
 
 ```powershell
 .\Scripts\real-zip-only-test.ps1
 ```
 
-脚本会先进入 1A 建立房间事件 session，再启动 OBS 录制并播放 1A TAS；如果 1A TAS 复用了进入录制前已经存在的同一房间 session，验证会复用该 session，而不是误判为“录制后没有新的 room event”。验证同时检查最终视频位于地图名子文件夹，且文件名仍为录制开始本地时间。
+脚本会先进入 1A 建立房间事件 session，再启动 OBS 录制并播放 1A TAS；如果 1A TAS 复用了进入录制前已经存在的同一房间 session，验证会复用该 session，而不是误判为“录制后没有新的 room event”。验证同时检查最终视频位于地图名子文件夹，且文件名仍为录制开始本地时间；可用 `ffprobe` 对比最终视频时长和 `clip_intervals.json` 的有效片段总时长，确认成片没有因时间戳异常变长或卡住。

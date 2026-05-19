@@ -18,6 +18,7 @@ public static class SelfTests
             ("load level becomes attempt reset after failure", LoadLevelResetsAttemptAfterFailure),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
+            ("revisited branching room gets separate death entry clips", RevisitedBranchingRoomGetsSeparateDeathEntryClips),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
             ("invalid anchor gaps are reported", InvalidAnchorGap),
@@ -253,10 +254,46 @@ public static class SelfTests
 
         var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
         Assert(roomBClips.Count == 2, "expected intro clip plus successful attempt after death in room b");
-        Assert(roomBClips[0].Reasons.Contains("room_entry_intro_before_clear"), "death room should preserve intro before clear");
-        Assert(roomBClips[0].StartUtc == roomBEnter && roomBClips[0].EndUtc == introLoad, "death-room intro boundaries mismatch");
+        Assert(roomBClips[0].Reasons.Contains("room_entry_before_first_death"), "death room should preserve entry through the first failed attempt");
+        Assert(roomBClips[0].StartUtc == roomBEnter && roomBClips[0].EndUtc == roomBEnter.AddMilliseconds(700), "death-room entry boundaries mismatch");
         Assert(roomBClips[1].Reasons.Contains("final_successful_attempt"), "second room-b clip should be the successful attempt");
         Assert(roomBClips[1].StartUtc == respawnLoad && roomBClips[1].EndUtc == clear, "successful attempt should restart from respawn load_level");
+    }
+
+    private static void RevisitedBranchingRoomGetsSeparateDeathEntryClips()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(1), Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(1), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(1_010), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "death", Utc = start.AddMilliseconds(1_500), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(2), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(3), Room = "b", NextRoom = "c", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(3), Room = "c", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(4), Room = "c", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(4), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(4_010), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "death", Utc = start.AddMilliseconds(4_500), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(5), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(6), Room = "b", NextRoom = "d", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
+        Assert(roomBClips.Count == 4, "each visit to branching room b should keep entry-to-first-death plus final success");
+        Assert(roomBClips.Count(c => c.Reasons.Contains("room_entry_before_first_death")) == 2, "both b visits should keep their own entry-death clip");
+        Assert(roomBClips.Where(c => c.Reasons.Contains("final_successful_attempt")).All(c => c.StartUtc != start.AddMilliseconds(1_500) && c.StartUtc != start.AddMilliseconds(4_500)), "death timestamps must not become successful clip starts");
+        Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_500), "first b visit entry-death boundaries mismatch");
+        Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_500), "second b visit entry-death boundaries mismatch");
     }
 
     private static void UnfinishedRoomKeepsIntroAtEnd()
@@ -390,6 +427,7 @@ public static class SelfTests
         var doc = Generate(StandardRoomEvents(BaseUtc.AddSeconds(2), endOffsetSeconds: 2), new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
         var plan = new AssemblyPlanner().CreatePlan(doc, new AssemblyOptions { DryRun = true });
         Assert(plan.PrecisionMode == "precise_reencode", "default assembly must represent precise final-output semantics");
+        Assert(plan.FfmpegCommand.Contains("final concat reencode", StringComparison.Ordinal), "precise assembly should document final concat reencode to avoid copied timestamp gaps");
         Assert(plan.FfconcatText.Contains("ffconcat version 1.0"), "dry-run should still emit ffconcat preview plan");
         Assert(plan.SegmentConcatText?.Contains("precise_segments/segment_0000.mp4") == true, "precise segment concat should be emitted");
     }

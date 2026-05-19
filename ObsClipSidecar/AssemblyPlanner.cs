@@ -32,7 +32,7 @@ public sealed class AssemblyPlanner
         var preciseConcat = BuildPreciseSegmentConcat(sliceList.Count);
         var command = precisionMode == "fast_preview_stream_copy"
             ? $"ffmpeg -safe 0 -f concat -i clip_plan.ffconcat -c copy {Quote(options.FinalOutputPath)}"
-            : $"ffmpeg # precise segment-reencode pipeline required -> {Quote(options.FinalOutputPath)}";
+            : $"ffmpeg # precise segment-reencode + final concat reencode pipeline required -> {Quote(options.FinalOutputPath)}";
 
         return new AssemblyPlan
         {
@@ -126,7 +126,11 @@ public sealed class AssemblyPlanner
         var concatText = BuildSegmentConcat(segmentPaths);
         var concatPath = Path.Combine(outputDirectory, "precise_segments.ffconcat");
         File.WriteAllText(concatPath, concatText, new UTF8Encoding(false));
-        RunFfmpeg(ffmpegPath, $"{OverwriteFlag(options)} -safe 0 -f concat -i {Quote(concatPath)} -c copy {Quote(finalOutputPath)}", outputDirectory);
+        RunFfmpeg(
+            ffmpegPath,
+            $"{OverwriteFlag(options)} -safe 0 -f concat -i {Quote(concatPath)} " +
+            $"-map 0:v:0 -map 0:a? -c:v {options.VideoCodec} -preset {options.Preset} -crf {options.Crf} -pix_fmt yuv420p -c:a {options.AudioCodec} -movflags +faststart {Quote(finalOutputPath)}",
+            outputDirectory);
     }
 
     private static string ResolveFfmpegPath(string? configuredPath)
