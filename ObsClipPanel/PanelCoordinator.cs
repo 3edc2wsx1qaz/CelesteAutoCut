@@ -15,6 +15,7 @@ public sealed class PanelCoordinator : BackgroundService
     private PanelStatus status = new();
     private string currentSessionId = "";
     private bool recordingSessionActive;
+    private bool roomEventsClearedForPendingRecordingStart;
     private bool autoAssembleInFlight;
 
     public PanelCoordinator(PanelStateStore stateStore)
@@ -140,7 +141,7 @@ public sealed class PanelCoordinator : BackgroundService
         }
     }
 
-    public Task<ApiResult> StartRecordAsync() => InvokeObsRequestAsync("StartRecord", successMessage: "Recording started.");
+    public Task<ApiResult> StartRecordAsync() => InvokeObsRequestAsync("StartRecord", successMessage: "Recording started.", clearRoomEventsBeforeStart: true);
     public Task<ApiResult> StopRecordAsync() => InvokeObsRequestAsync("StopRecord", successMessage: "Recording stopped.");
     public Task<ApiResult> PauseRecordAsync() => InvokeObsRequestAsync("PauseRecord", successMessage: "Recording paused.");
     public Task<ApiResult> ResumeRecordAsync() => InvokeObsRequestAsync("ResumeRecord", successMessage: "Recording resumed.");
@@ -352,6 +353,7 @@ public sealed class PanelCoordinator : BackgroundService
         if (!outputActive && statusBefore.RecordingActive)
         {
             recordingSessionActive = false;
+            roomEventsClearedForPendingRecordingStart = false;
             if (settings.AutoAssembleOnStop)
             {
                 QueueAutoAssemble();
@@ -402,6 +404,7 @@ public sealed class PanelCoordinator : BackgroundService
                     if (!active && !isStoppingTransition && settings.AutoAssembleOnStop)
                     {
                         recordingSessionActive = false;
+                        roomEventsClearedForPendingRecordingStart = false;
                         QueueAutoAssemble();
                     }
                     break;
@@ -438,7 +441,7 @@ public sealed class PanelCoordinator : BackgroundService
         }
     }
 
-    private async Task<ApiResult> InvokeObsRequestAsync(string requestType, string successMessage)
+    private async Task<ApiResult> InvokeObsRequestAsync(string requestType, string successMessage, bool clearRoomEventsBeforeStart = false)
     {
         await operationLock.WaitAsync();
         try
@@ -448,9 +451,25 @@ public sealed class PanelCoordinator : BackgroundService
                 return ApiResult.Fail("OBS websocket is not connected.");
             }
 
+            if (clearRoomEventsBeforeStart)
+            {
+                if (GetStatus().RecordingActive || recordingSessionActive)
+                {
+                    return ApiResult.Fail("OBS recording is already active.");
+                }
+
+                ClearRoomEventsLog(stateStore.GetSettings());
+                roomEventsClearedForPendingRecordingStart = true;
+            }
+
             var result = await obsClient.RequestAsync(requestType, null, CancellationToken.None);
             if (!result.Success)
             {
+                if (clearRoomEventsBeforeStart)
+                {
+                    roomEventsClearedForPendingRecordingStart = false;
+                }
+
                 SetError(string.IsNullOrWhiteSpace(result.Comment) ? $"{requestType} failed." : result.Comment);
                 return ApiResult.Fail(string.IsNullOrWhiteSpace(result.Comment) ? $"{requestType} failed." : result.Comment);
             }
@@ -515,6 +534,12 @@ public sealed class PanelCoordinator : BackgroundService
             {
                 return;
             }
+
+            if (!roomEventsClearedForPendingRecordingStart)
+            {
+                ClearRoomEventsLog(settings);
+            }
+            roomEventsClearedForPendingRecordingStart = false;
 
             currentSessionId = SanitizeSessionName(null);
             var paths = EnsureSessionPaths(currentSessionId, settings, recordingOutputPath);
@@ -663,6 +688,18 @@ public sealed class PanelCoordinator : BackgroundService
     {
         Directory.CreateDirectory(settings.WorkingDirectory);
         Directory.CreateDirectory(Path.Combine(settings.WorkingDirectory, "sessions"));
+    }
+
+    private static void ClearRoomEventsLog(PanelSettings settings)
+    {
+        var path = Path.GetFullPath(settings.RoomEventsPath);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.WriteAllText(path, string.Empty);
     }
 
     private SessionPaths EnsureSessionPaths(string sessionId, PanelSettings settings, string? recordingOutputPath = null, DateTimeOffset? recordingStartUtc = null, string? mapSid = null)

@@ -8,7 +8,7 @@ CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** �
 2. 在 OBS 中开始录制（推荐 `.mkv`）。
 3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
 
-当前版本重点修复：剪辑区间改为按时间顺序单次线性扫描事件；首房间不会再被初始 `load_level` 截掉；每次 `room_enter -> load_level` 都会作为进房片段保留；死亡后的成功片段只从后续同房间 `load_level` 接到 `transition`、`strawberry_collect` 或 `level_complete`；`level_complete -> exit` 也会保留；草莓房会记录 `strawberry_collect`，拿到草莓这一刻就算本次尝试成功，并继续保留 `strawberry_collect -> first room_enter/exit`，中间即使发生 `death` 也不会截断这段尾巴；时间首尾相连的候选区间会先合并再交给 ffmpeg，避免 1ms 转场片段生成音频-only segment；一次录制跨多个地图时会按地图分别输出到对应地图名文件夹；折返抑制已移除，`A -> B -> A -> B` 这类路线会按普通房间事件处理；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
+当前版本重点修复：剪辑区间改为按时间顺序单次线性扫描事件；首房间不会再被初始 `load_level` 截掉；每次 `room_enter -> load_level` 都会作为进房片段保留，若它没有和后续 `load_level -> ...` 连续合并，会在 `load_level` 后额外保留一小段 delay；死亡后的成功片段只从后续同房间 `load_level` 接到 `transition`、`strawberry_collect` 或 `level_complete`，且 `load_level(playerIntro=Respawn)` 起点不会应用 pre-roll，避免把死亡前画面卷进来；`level_complete -> exit` 也会保留；草莓房会记录 `strawberry_collect`，拿到草莓这一刻就算本次尝试成功，并继续保留 `strawberry_collect -> first room_enter/exit`，中间即使发生 `death` 也不会截断这段尾巴；时间首尾相连的候选区间会先合并再交给 ffmpeg，避免 1ms 转场片段生成音频-only segment；一次录制跨多个地图时会按地图分别输出到对应地图名文件夹；折返抑制已移除，`A -> B -> A -> B` 这类路线会按普通房间事件处理；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
 
 ---
 
@@ -77,6 +77,8 @@ E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 <Celeste>/CelesteAutoCutReplays/room_events.jsonl
 ```
 
+OBS helper 在每次开始新的 OBS 录制前会先清空这个文件，避免上一次录制或大厅残留事件混入本次剪辑；通过 helper API 点击“开始录制”时会在发送 `StartRecord` 前清空，若检测到外部方式启动录制，也会在新 session 初始化时清空。
+
 helper 工作目录：
 
 ```text
@@ -132,8 +134,10 @@ helper 工作目录：
   - `load_level -> level_complete`：保留为 `final_successful_attempt`，然后继续保留后续 `level_complete -> exit`；
   - `load_level -> exit`：不保留成功片段，直接跳到后续 session；
 - `death` / `load_end` 会使当前 `load_level` 失效；只有后续同一 `MapSid + Room` 的新 `load_level` 才能重新成为成功片段起点；
+- 若成功片段从 `load_level(playerIntro=Respawn)` 开始，该片段起点不会应用 pre-roll，会直接从人物加载完毕的时间点开始，避免死亡前画面残留；
 - 不符合上述模式的事件不会生成片段，诊断会写入 `clip_intervals.json` 的 `warnings`，不会刷 Celeste 控制台；
 - 事件时间上首尾相连且属于同一地图的候选区间会合并成一个 `merged_linear_interval`，不会删除 1ms 这类过短候选；这样既保留转场时间，又避免 ffmpeg 生成只有音频没有视频帧的超短 segment；
+- 如果 `room_enter -> load_level` 没有和后续成功区间时间连续合并，会在 `load_level` 后应用一次 `PostRollMs` delay，原因标记为 `room_entry_load_delay`，避免进房片段刚加载完就硬切；
 - 折返抑制已取消：`A -> B -> A -> B`、支路返回、同名房间再进入都按同一套线性事件规则处理。
 
 最终拼接规则：
@@ -221,7 +225,7 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 当前自测覆盖：
 
 - 首房间初始 `Transition load_level` 不截断房间开头；
-- 死亡房间保留“进入房间 -> 初始 `load_level`”，成功片段从 `Respawn` 开始而不是从 `death` 开始；
+- 死亡房间保留“进入房间 -> 初始 `load_level`”，成功片段从 `Respawn load_level` 精确开始而不是从 `death` 或死亡前 pre-roll 开始；
 - 分支后再次进入同名房间时，每次访问独立生成片段；
 - 折返抑制已取消，来回折返会按普通 `room_enter/load_level/transition` 事件生成片段；
 - 支路返回 Hub 后继续前进的路线会被保留；

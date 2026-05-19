@@ -68,12 +68,17 @@ public sealed class IntervalGenerator
                 continue;
             }
 
-            var preRollMs = candidate.IsCheckpointIntro ? 0 : options.PreRollMs;
-            var postRollMs = candidate.IsCheckpointIntro ? 0 : options.PostRollMs;
+            var preRollMs = candidate.IsCheckpointIntro || StartsAtRespawnLoadLevel(candidate) ? 0 : options.PreRollMs;
+            var addsRoomEntryLoadDelay = IsStandaloneRoomEntryLoad(candidate);
+            var postRollMs = candidate.IsCheckpointIntro && !addsRoomEntryLoadDelay ? 0 : options.PostRollMs;
             var startMs = Math.Max(0, startEstimate.EstimatedOutputDurationMs - preRollMs);
             var endMs = endEstimate.EstimatedOutputDurationMs + postRollMs;
             var preparedClip = new PreparedClip(candidate, startEstimate, endEstimate, recording, startMs, endMs, baseReasons);
             preparedClip.Annotations.AddRange(annotations);
+            if (addsRoomEntryLoadDelay && postRollMs > 0)
+            {
+                preparedClip.Annotations.Add("room_entry_load_delay");
+            }
             prepared.Add(preparedClip);
         }
 
@@ -862,6 +867,13 @@ public sealed class IntervalGenerator
 
         return reasons;
     }
+
+    private static bool StartsAtRespawnLoadLevel(ClipCandidate candidate)
+        => string.Equals(candidate.Start.EventType, "load_level", StringComparison.Ordinal) &&
+           IsRespawnLoadLevel(candidate.Start);
+
+    private static bool IsStandaloneRoomEntryLoad(ClipCandidate candidate)
+        => string.Equals(candidate.BaseValidReason, "room_entry_load", StringComparison.Ordinal);
 
     private static BoundaryEstimate EstimateBoundary(DateTimeOffset utc, SessionManifest manifest, long maxAllowedAnchorGapMs)
     {
