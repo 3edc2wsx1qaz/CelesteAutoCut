@@ -23,7 +23,9 @@ public static class SelfTests
             ("strawberry room succeeds at collect after death", StrawberryRoomSucceedsAtCollectAfterDeath),
             ("strawberry before death is kept at collect only", StrawberryBeforeDeathIsKeptAtCollectOnly),
             ("strawberry room without death ends at collect", StrawberryRoomWithoutDeathEndsAtCollect),
-            ("accidental backtrack to cleared previous room is cut", AccidentalBacktrackToClearedPreviousRoomIsCut),
+            ("strawberry tail keeps death until exit", StrawberryTailKeepsDeathUntilExit),
+            ("level complete keeps final load interval", LevelCompleteKeepsFinalLoadInterval),
+            ("backtrack bounce is not suppressed", BacktrackBounceIsNotSuppressed),
             ("branch return to hub room is kept", BranchReturnToHubRoomIsKept),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
@@ -77,7 +79,8 @@ public static class SelfTests
     {
         var events = new List<RoomEvent>
         {
-            new() { EventType = "room_start", Utc = BaseUtc.AddSeconds(9), Room = "a", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = BaseUtc.AddSeconds(9), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = BaseUtc.AddSeconds(9), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = BaseUtc.AddSeconds(11), Room = "a", NextRoom = "b", MapSid = "map" }
         };
         var doc = Generate(events, new SessionManifest
@@ -124,8 +127,10 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "Celeste/1-ForsakenCity" },
+            new() { EventType = "load_level", Utc = start, Room = "a", MapSid = "Celeste/1-ForsakenCity", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "Celeste/1-ForsakenCity" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "b", MapSid = "Celeste/1-ForsakenCity" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(2), Room = "b", MapSid = "Celeste/1-ForsakenCity", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(4), Room = "b", NextRoom = "c", MapSid = "Celeste/1-ForsakenCity" }
         };
 
@@ -149,8 +154,10 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(2), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(4), Room = "b", NextRoom = "c", MapSid = "map" }
         };
 
@@ -194,6 +201,7 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "death", Utc = start.AddMilliseconds(750), Room = "a", MapSid = "map" },
             new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
@@ -228,9 +236,11 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        Assert(doc.Clips.Count == 1, "first room should produce one non-overlapping valid clip");
-        Assert(doc.Clips[0].Reasons.Contains("final_successful_attempt"), "first room should be kept as the successful attempt");
-        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == clear, "initial transition load_level must not cut off first-room intro");
+        Assert(doc.Clips.Count == 2, "first room should keep entry-load intro plus load-transition success");
+        Assert(doc.Clips[0].Reasons.Contains("room_entry_load"), "first room should keep room_enter -> load_level");
+        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == introLoad, "initial room-entry segment boundaries mismatch");
+        Assert(doc.Clips[1].Reasons.Contains("final_successful_attempt"), "first room should keep load_level -> transition as success");
+        Assert(doc.Clips[1].StartUtc == introLoad && doc.Clips[1].EndUtc == clear, "load_level success segment boundaries mismatch");
         Assert(doc.InvalidClips.Count == 0, "first room should not create an overlapping intro candidate");
     }
 
@@ -262,7 +272,7 @@ public static class SelfTests
 
         var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
         Assert(roomBClips.Count == 2, "expected intro clip plus successful attempt after death in room b");
-        Assert(roomBClips[0].Reasons.Contains("room_entry_intro_before_clear"), "death room should preserve entry through initial load_level");
+        Assert(roomBClips[0].Reasons.Contains("room_entry_load"), "death room should preserve entry through initial load_level");
         Assert(roomBClips[0].StartUtc == roomBEnter && roomBClips[0].EndUtc == introLoad, "death-room intro boundaries mismatch");
         Assert(roomBClips[1].Reasons.Contains("final_successful_attempt"), "second room-b clip should be the successful attempt");
         Assert(roomBClips[1].StartUtc == respawnLoad && roomBClips[1].EndUtc == clear, "successful attempt should restart from respawn load_level");
@@ -274,16 +284,18 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(1), Room = "a", NextRoom = "b", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(1), Room = "b", MapSid = "map" },
-            new() { EventType = "load_level", Utc = start.AddMilliseconds(1_010), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(1_100), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "death", Utc = start.AddMilliseconds(1_500), Room = "b", MapSid = "map" },
             new() { EventType = "load_level", Utc = start.AddSeconds(2), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
             new() { EventType = "transition", Utc = start.AddSeconds(3), Room = "b", NextRoom = "c", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(3), Room = "c", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(3), Room = "c", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(4), Room = "c", NextRoom = "b", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(4), Room = "b", MapSid = "map" },
-            new() { EventType = "load_level", Utc = start.AddMilliseconds(4_010), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(4_100), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "death", Utc = start.AddMilliseconds(4_500), Room = "b", MapSid = "map" },
             new() { EventType = "load_level", Utc = start.AddSeconds(5), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
             new() { EventType = "transition", Utc = start.AddSeconds(6), Room = "b", NextRoom = "d", MapSid = "map" }
@@ -298,10 +310,10 @@ public static class SelfTests
 
         var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
         Assert(roomBClips.Count == 4, "each visit to branching room b should keep entry-to-load-level plus final success");
-        Assert(roomBClips.Count(c => c.Reasons.Contains("room_entry_intro_before_clear")) == 2, "both b visits should keep their own entry-load intro clip");
+        Assert(roomBClips.Count(c => c.Reasons.Contains("room_entry_load")) == 2, "both b visits should keep their own entry-load intro clip");
         Assert(roomBClips.Where(c => c.Reasons.Contains("final_successful_attempt")).All(c => c.StartUtc != start.AddMilliseconds(1_500) && c.StartUtc != start.AddMilliseconds(4_500)), "death timestamps must not become successful clip starts");
-        Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_010), "first b visit entry-load boundaries mismatch");
-        Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_010), "second b visit entry-load boundaries mismatch");
+        Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_100), "first b visit entry-load boundaries mismatch");
+        Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_100), "second b visit entry-load boundaries mismatch");
     }
 
     private static void DeathOnRevisitKeepsEarliestUncoveredRoomIntro()
@@ -315,11 +327,13 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = firstEnter, Room = "a", NextRoom = "b", MapSid = "map" },
             new() { EventType = "room_enter", Utc = firstEnter, Room = "b", MapSid = "map" },
             new() { EventType = "load_level", Utc = firstLoad, Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "b", NextRoom = "a", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(2), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = secondEnter, Room = "a", NextRoom = "b", MapSid = "map" },
             new() { EventType = "room_enter", Utc = secondEnter, Room = "b", MapSid = "map" },
             new() { EventType = "load_level", Utc = secondLoad, Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
@@ -335,7 +349,7 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var roomBIntros = doc.Clips.Where(c => c.Room == "b" && c.Reasons.Contains("room_entry_intro_before_clear")).OrderBy(c => c.StartUtc).ToList();
+        var roomBIntros = doc.Clips.Where(c => c.Room == "b" && c.Reasons.Contains("room_entry_load")).OrderBy(c => c.StartUtc).ToList();
         Assert(roomBIntros.Count == 2, "death room should keep earliest uncovered entry-load intro and the later death-visit intro");
         Assert(roomBIntros[0].StartUtc == firstEnter && roomBIntros[0].EndUtc == firstLoad, "earliest room-b intro should not be lost after revisit death");
         Assert(roomBIntros[1].StartUtc == secondEnter && roomBIntros[1].EndUtc == secondLoad, "death-visit room-b intro should remain separate");
@@ -367,7 +381,7 @@ public static class SelfTests
         var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
         Assert(success.StartUtc == respawnLoad && success.EndUtc == collect, "strawberry success after death should start from respawn/load_level and end at collect");
         Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == clear), "strawberry transition after collect should not create a second success clip");
-        Assert(doc.Clips.Any(c => c.Room == "berry" && c.Reasons.Contains("room_entry_intro_before_clear")), "death strawberry room should still keep entry-load intro");
+        Assert(doc.Clips.Any(c => c.Room == "berry" && c.Reasons.Contains("room_entry_load")), "death strawberry room should still keep entry-load intro");
     }
 
     private static void StrawberryBeforeDeathIsKeptAtCollectOnly()
@@ -392,9 +406,9 @@ public static class SelfTests
         });
 
         var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
-        Assert(success.StartUtc == start && success.EndUtc == collect, "strawberry collected before death should still be kept through collect");
+        Assert(success.StartUtc == start.AddMilliseconds(200) && success.EndUtc == collect, "strawberry collected before death should keep load_level -> collect");
         Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == start.AddSeconds(2)), "later no-collect exit after death must not create another success clip");
-        Assert(doc.Clips.Any(c => c.Room == "berry" && c.StartUtc == start && c.EndUtc == collect), "collect-success clip should cover the first room entry segment even if death happens later");
+        Assert(doc.Clips.Any(c => c.Room == "berry" && c.StartUtc == start && c.EndUtc == start.AddMilliseconds(200)), "room entry -> load segment should cover the first room entry even if death happens later");
     }
 
     private static void StrawberryRoomWithoutDeathEndsAtCollect()
@@ -418,22 +432,75 @@ public static class SelfTests
         });
 
         var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
-        Assert(success.StartUtc == start && success.EndUtc == collect, "strawberry room without death should keep entry -> collect");
+        Assert(success.StartUtc == start.AddMilliseconds(200) && success.EndUtc == collect, "strawberry room without death should keep load_level -> collect");
         Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == clear), "strawberry room should not wait for exit once collect succeeded");
     }
 
-    private static void AccidentalBacktrackToClearedPreviousRoomIsCut()
+    private static void StrawberryTailKeepsDeathUntilExit()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var collect = start.AddMilliseconds(500);
+        var exit = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "berry", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "strawberry_collect", Utc = collect, Room = "berry", MapSid = "map" },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "berry", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "exit", Utc = exit, Room = "berry", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var tail = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_to_exit"));
+        Assert(tail.StartUtc == collect && tail.EndUtc == exit, "strawberry tail should keep collect -> first exit even with death in between");
+    }
+
+    private static void LevelCompleteKeepsFinalLoadInterval()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(300);
+        var complete = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "end", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "end", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "level_complete", Utc = complete, Room = "end", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var success = doc.Clips.Single(c => c.Room == "end" && c.Reasons.Contains("final_successful_attempt"));
+        Assert(success.StartUtc == load && success.EndUtc == complete, "level_complete should keep load_level -> level_complete");
+    }
+
+    private static void BacktrackBounceIsNotSuppressed()
     {
         var start = BaseUtc.AddSeconds(2);
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(1), Room = "a", NextRoom = "b", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(1), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "b", NextRoom = "a", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(2), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(3), Room = "a", NextRoom = "b", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(3), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(3), Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(4), Room = "b", NextRoom = "c", MapSid = "map" }
         };
 
@@ -445,11 +512,11 @@ public static class SelfTests
         });
 
         var clips = doc.Clips.OrderBy(c => c.StartUtc).ToList();
-        Assert(clips.Count == 2, "backtrack bounce should keep only the original cleared room and the later forward clear");
+        Assert(clips.Count == 4, "backtrack bounce suppression is disabled, so every load -> transition success stays");
         Assert(clips[0].Room == "a" && clips[0].StartUtc == start && clips[0].EndUtc == start.AddSeconds(1), "initial room a clear should stay");
-        Assert(clips[1].Room == "b" && clips[1].StartUtc == start.AddSeconds(3) && clips[1].EndUtc == start.AddSeconds(4), "room b should restart after returning from accidental backtrack");
-        Assert(!doc.Clips.Any(c => c.Room == "a" && c.StartUtc == start.AddSeconds(2)), "already-cleared room revisit should be cut");
-        Assert(!doc.Clips.Any(c => c.Room == "b" && c.EndUtc == start.AddSeconds(2)), "failed transition back to previous cleared room should be cut");
+        Assert(clips[1].Room == "b" && clips[1].StartUtc == start.AddSeconds(1) && clips[1].EndUtc == start.AddSeconds(2), "reverse transition should stay when suppression is disabled");
+        Assert(clips[2].Room == "a" && clips[2].StartUtc == start.AddSeconds(2) && clips[2].EndUtc == start.AddSeconds(3), "re-entered room should stay when suppression is disabled");
+        Assert(clips[3].Room == "b" && clips[3].StartUtc == start.AddSeconds(3) && clips[3].EndUtc == start.AddSeconds(4), "final forward room b clear should stay");
     }
 
     private static void BranchReturnToHubRoomIsKept()
@@ -458,10 +525,13 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "hub", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start, Room = "hub", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(1), Room = "hub", NextRoom = "side", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(1), Room = "side", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "side", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "side", NextRoom = "hub", MapSid = "map" },
             new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "hub", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(2), Room = "hub", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
             new() { EventType = "transition", Utc = start.AddSeconds(3), Room = "hub", NextRoom = "exit", MapSid = "map" }
         };
 
@@ -498,7 +568,7 @@ public static class SelfTests
         });
 
         Assert(doc.Clips.Count == 1, "expected only trailing intro clip for unfinished room");
-        Assert(doc.Clips[0].Reasons.Contains("room_entry_intro_at_end"), "unfinished room should emit trailing intro clip");
+        Assert(doc.Clips[0].Reasons.Contains("room_entry_load"), "unfinished room should emit room_entry_load clip");
         Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == introLoad, "unfinished intro boundaries mismatch");
     }
 
@@ -724,9 +794,10 @@ public static class SelfTests
 
     private static List<RoomEvent> StandardRoomEvents(DateTimeOffset start, int endOffsetSeconds = 2) =>
     [
-        new RoomEvent { EventType = "room_start", Utc = start, Room = "a", MapSid = "map" },
+        new RoomEvent { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+        new RoomEvent { EventType = "load_level", Utc = start, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
         new RoomEvent { EventType = "death", Utc = start.AddMilliseconds(750), Room = "a", MapSid = "map" },
-        new RoomEvent { EventType = "respawn", Utc = start.AddSeconds(1), Room = "a", MapSid = "map" },
+        new RoomEvent { EventType = "load_level", Utc = start.AddSeconds(1), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
         new RoomEvent { EventType = "transition", Utc = start.AddSeconds(endOffsetSeconds), Room = "a", NextRoom = "b", MapSid = "map" }
     ];
 

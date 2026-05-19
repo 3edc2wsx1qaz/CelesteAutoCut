@@ -2,6 +2,8 @@ namespace ObsClipSidecar;
 
 public sealed class IntervalGenerator
 {
+    private const long MinimumVideoClipDurationMs = 50;
+
     public ClipIntervalsDocument Generate(IReadOnlyList<RoomEvent> roomEvents, SessionManifest manifest, IntervalGenerationOptions? options = null)
     {
         options ??= new IntervalGenerationOptions();
@@ -24,14 +26,7 @@ public sealed class IntervalGenerator
             .Select(x => x.Event)
             .ToList();
 
-        var suppressedBacktrackTransitions = FindAccidentalBacktrackTransitions(sortedEvents);
-        var successfulAttemptCandidates = BuildSuccessfulAttemptCandidates(sortedEvents, suppressedBacktrackTransitions);
-        var candidates = successfulAttemptCandidates
-            .Concat(BuildCheckpointIntroCandidates(sortedEvents, suppressedBacktrackTransitions, successfulAttemptCandidates))
-            .OrderBy(c => c.Start.Utc)
-            .ThenBy(c => c.End.Utc)
-            .ThenBy(c => c.Start.GameFrame ?? long.MaxValue)
-            .ThenBy(c => c.End.GameFrame ?? long.MaxValue)
+        var candidates = BuildLinearKeepCandidates(sortedEvents, warnings)
             .Select((c, index) => c with { Index = index })
             .ToList();
         var prepared = new List<PreparedClip>();
@@ -96,6 +91,13 @@ public sealed class IntervalGenerator
                 continue;
             }
 
+            if (clip.EndMs - clip.StartMs < MinimumVideoClipDurationMs)
+            {
+                reasons.Add("clip_too_short_for_video");
+                AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, reasons, invalid, clip.StartMs, clip.EndMs);
+                continue;
+            }
+
             if (reasons.Count > 0)
             {
                 AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, reasons, invalid, clip.StartMs, clip.EndMs);
@@ -154,6 +156,347 @@ public sealed class IntervalGenerator
             Warnings = warnings
         };
     }
+
+    private static List<ClipCandidate> BuildLinearKeepCandidates(IReadOnlyList<RoomEvent> events, List<string> warnings)
+    {
+        var result = new List<ClipCandidate>();
+        var index = 0;
+        var i = 0;
+
+        while (i < events.Count)
+        {
+            var e = events[i];
+            if (IsSessionStart(e))
+            {
+                var sessionStart = e;
+                i++;
+                var foundRoomEnter = false;
+                while (i < events.Count)
+                {
+                    var next = events[i];
+                    if (IsRoomEntry(next))
+                    {
+                        AddCandidate(result, ref index, sessionStart, next, next.Room ?? sessionStart.Room ?? "room", next.MapSid ?? sessionStart.MapSid, "session_intro", true);
+                        foundRoomEnter = true;
+                        break;
+                    }
+
+                    if (IsSessionBoundary(next))
+                    {
+                        warnings.Add(DiscardWarning("linear_discard_missing_room_enter_after_session", sessionStart));
+                        break;
+                    }
+
+                    warnings.Add(DiscardWarning("linear_discard_unhandled_event_before_first_room_enter", next));
+                    i++;
+                }
+
+                if (!foundRoomEnter)
+                {
+                    continue;
+                }
+            }
+            else if (!IsRoomEntry(e))
+            {
+                if (IsExitLike(e) || IsSessionEnd(e))
+                {
+                    i++;
+                    continue;
+                }
+
+                warnings.Add(DiscardWarning("linear_discard_unhandled_event", e));
+                i++;
+                continue;
+            }
+
+            while (i < events.Count && !IsSessionStart(events[i]))
+            {
+                if (IsExitLike(events[i]) || IsSessionEnd(events[i]))
+                {
+                    i++;
+                    break;
+                }
+
+                if (!IsRoomEntry(events[i]))
+                {
+                    warnings.Add(DiscardWarning("linear_discard_unhandled_event", events[i]));
+                    i++;
+                    continue;
+                }
+
+                var roomEnter = events[i];
+                i++;
+
+                if (!TryReadRoomEntryLoad(events, ref i, roomEnter, warnings, result, ref index, out var firstLoad))
+                {
+                    continue;
+                }
+
+                var level = LevelIdentity.From(firstLoad);
+                RoomEvent? activeLoad = firstLoad;
+                var sessionDone = false;
+
+                while (i < events.Count)
+                {
+                    var current = events[i];
+                    if (IsSessionStart(current))
+                    {
+                        sessionDone = true;
+                        break;
+                    }
+
+                    if (IsSessionEnd(current))
+                    {
+                        i++;
+                        sessionDone = true;
+                        break;
+                    }
+
+                    if (IsRoomEntry(current))
+                    {
+                        warnings.Add(DiscardWarning("linear_discard_missing_success_before_room_enter", current));
+                        break;
+                    }
+
+                    if (IsExitLike(current))
+                    {
+                        if (activeLoad is not null)
+                        {
+                            warnings.Add(DiscardWarning("linear_discard_load_to_exit", current));
+                        }
+
+                        i++;
+                        sessionDone = true;
+                        break;
+                    }
+
+                    if (current.EventType is "death" or "load_end")
+                    {
+                        activeLoad = null;
+                        warnings.Add(DiscardWarning("linear_discard_death_before_success", current));
+                        i++;
+                        continue;
+                    }
+
+                    if (current.EventType is "load_level")
+                    {
+                        if (level.Matches(current))
+                        {
+                            activeLoad = current;
+                        }
+                        else
+                        {
+                            warnings.Add(DiscardWarning("linear_discard_level_mismatch", current));
+                        }
+
+                        i++;
+                        continue;
+                    }
+
+                    if (current.EventType is "transition")
+                    {
+                        if (activeLoad is not null && level.Matches(current))
+                        {
+                            AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "final_successful_attempt", false);
+                            i++;
+                            KeepTransitionTail(events, ref i, current, warnings, result, ref index);
+                            break;
+                        }
+
+                        warnings.Add(DiscardWarning("linear_discard_transition_without_live_load", current));
+                        i++;
+                        continue;
+                    }
+
+                    if (IsStrawberryCollect(current))
+                    {
+                        if (activeLoad is not null && level.Matches(current))
+                        {
+                            AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "strawberry_collect_success", false);
+                            i++;
+                            var endedSession = KeepStrawberryTail(events, ref i, current, warnings, result, ref index);
+                            if (endedSession)
+                            {
+                                sessionDone = true;
+                            }
+
+                            break;
+                        }
+
+                        warnings.Add(DiscardWarning("linear_discard_strawberry_without_live_load", current));
+                        i++;
+                        continue;
+                    }
+
+                    if (current.EventType is "level_complete")
+                    {
+                        if (activeLoad is not null && level.Matches(current))
+                        {
+                            AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "final_successful_attempt", false);
+                        }
+                        else
+                        {
+                            warnings.Add(DiscardWarning("linear_discard_level_complete_without_live_load", current));
+                        }
+
+                        i++;
+                        sessionDone = true;
+                        break;
+                    }
+
+                    warnings.Add(DiscardWarning("linear_discard_unhandled_event", current));
+                    i++;
+                }
+
+                if (sessionDone)
+                {
+                    break;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryReadRoomEntryLoad(
+        IReadOnlyList<RoomEvent> events,
+        ref int i,
+        RoomEvent roomEnter,
+        List<string> warnings,
+        List<ClipCandidate> result,
+        ref int index,
+        out RoomEvent firstLoad)
+    {
+        while (i < events.Count)
+        {
+            var current = events[i];
+            if (current.EventType is "load_level")
+            {
+                if (SameMapAndRoom(roomEnter, current))
+                {
+                    firstLoad = current;
+                    AddCandidate(result, ref index, roomEnter, firstLoad, roomEnter.Room ?? firstLoad.Room ?? "room", roomEnter.MapSid ?? firstLoad.MapSid, "room_entry_load", true);
+                    i++;
+                    return true;
+                }
+
+                warnings.Add(DiscardWarning("linear_discard_level_mismatch_before_entry_load", current));
+                i++;
+                continue;
+            }
+
+            if (IsSessionStart(current) || IsSessionEnd(current) || IsExitLike(current) || IsRoomEntry(current))
+            {
+                warnings.Add(DiscardWarning("linear_discard_missing_load_level_after_room_enter", roomEnter));
+                firstLoad = roomEnter;
+                return false;
+            }
+
+            warnings.Add(DiscardWarning("linear_discard_unhandled_event_before_entry_load", current));
+            i++;
+        }
+
+        warnings.Add(DiscardWarning("linear_discard_missing_load_level_after_room_enter", roomEnter));
+        firstLoad = roomEnter;
+        return false;
+    }
+
+    private static void KeepTransitionTail(
+        IReadOnlyList<RoomEvent> events,
+        ref int i,
+        RoomEvent transition,
+        List<string> warnings,
+        List<ClipCandidate> result,
+        ref int index)
+    {
+        while (i < events.Count)
+        {
+            var current = events[i];
+            if (IsRoomEntry(current))
+            {
+                AddCandidate(result, ref index, transition, current, current.Room ?? transition.NextRoom ?? transition.Room ?? "room", current.MapSid ?? transition.MapSid, "transition_to_room_enter", true);
+                return;
+            }
+
+            if (IsSessionStart(current))
+            {
+                warnings.Add(DiscardWarning("linear_discard_missing_room_enter_after_transition", transition));
+                return;
+            }
+
+            if (IsExitLike(current) || IsSessionEnd(current))
+            {
+                warnings.Add(DiscardWarning("linear_discard_missing_room_enter_after_transition", transition));
+                i++;
+                return;
+            }
+
+            warnings.Add(DiscardWarning("linear_discard_unhandled_event_after_transition", current));
+            i++;
+        }
+
+        warnings.Add(DiscardWarning("linear_discard_missing_room_enter_after_transition", transition));
+    }
+
+    private static bool KeepStrawberryTail(
+        IReadOnlyList<RoomEvent> events,
+        ref int i,
+        RoomEvent strawberry,
+        List<string> warnings,
+        List<ClipCandidate> result,
+        ref int index)
+    {
+        while (i < events.Count)
+        {
+            var current = events[i];
+            if (IsRoomEntry(current))
+            {
+                AddCandidate(result, ref index, strawberry, current, current.Room ?? strawberry.Room ?? "room", current.MapSid ?? strawberry.MapSid, "strawberry_collect_to_room_enter", true);
+                return false;
+            }
+
+            if (IsExitLike(current) || IsSessionEnd(current))
+            {
+                AddCandidate(result, ref index, strawberry, current, strawberry.Room ?? current.Room ?? "room", strawberry.MapSid ?? current.MapSid, "strawberry_collect_to_exit", true);
+                i++;
+                return true;
+            }
+
+            if (IsSessionStart(current))
+            {
+                warnings.Add(DiscardWarning("linear_discard_missing_room_enter_or_exit_after_strawberry", strawberry));
+                return true;
+            }
+
+            i++;
+        }
+
+        warnings.Add(DiscardWarning("linear_discard_missing_room_enter_or_exit_after_strawberry", strawberry));
+        return true;
+    }
+
+    private static void AddCandidate(List<ClipCandidate> result, ref int index, RoomEvent start, RoomEvent end, string room, string? mapSid, string reason, bool isCheckpointIntro)
+    {
+        result.Add(new ClipCandidate(index++, start, end, room, mapSid, reason, isCheckpointIntro));
+    }
+
+    private static bool IsSessionStart(RoomEvent e)
+        => e.EventType is "session_start";
+
+    private static bool IsSessionEnd(RoomEvent e)
+        => e.EventType is "session_end";
+
+    private static bool IsSessionBoundary(RoomEvent e)
+        => IsSessionStart(e) || IsSessionEnd(e) || IsExitLike(e);
+
+    private static bool IsRoomEntry(RoomEvent e)
+        => e.EventType is "room_enter" or "room_start";
+
+    private static bool IsExitLike(RoomEvent e)
+        => e.EventType is "exit" or "on_exit";
+
+    private static string DiscardWarning(string code, RoomEvent e)
+        => $"{code}:{e.MapSid ?? ""}:{e.Room ?? ""}:{e.Utc:O}";
 
     private static List<ClipCandidate> BuildSuccessfulAttemptCandidates(IReadOnlyList<RoomEvent> events, IReadOnlySet<RoomEvent> suppressedTransitions)
     {
@@ -380,6 +723,11 @@ public sealed class IntervalGenerator
                      .ThenBy(c => c.EndMs)
                      .ThenBy(c => c.Candidate.Index))
         {
+            if (clip.EndMs <= clip.StartMs || clip.BlockingReasons.Count > 0)
+            {
+                continue;
+            }
+
             if (previous is not null &&
                 string.Equals(previous.Recording.RecordingId, clip.Recording.RecordingId, StringComparison.Ordinal) &&
                 clip.StartMs < previous.EndMs)
@@ -743,6 +1091,16 @@ public sealed class IntervalGenerator
     {
         public static RoomIdentity From(RoomEvent e)
             => new(e.MapSid ?? string.Empty, e.Room ?? string.Empty);
+    }
+
+    private readonly record struct LevelIdentity(string MapSid, string Room)
+    {
+        public static LevelIdentity From(RoomEvent e)
+            => new(e.MapSid ?? string.Empty, e.Room ?? string.Empty);
+
+        public bool Matches(RoomEvent e)
+            => string.Equals(MapSid, e.MapSid ?? string.Empty, StringComparison.Ordinal) &&
+               string.Equals(Room, e.Room ?? string.Empty, StringComparison.Ordinal);
     }
 
     private readonly record struct RoomIntro(RoomEvent Entry, RoomEvent InitialCheckpoint);

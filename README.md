@@ -8,7 +8,7 @@ CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** �
 2. 在 OBS 中开始录制（推荐 `.mkv`）。
 3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
 
-当前版本重点修复：首房间不会再被初始 `load_level` 截掉；有死亡的房间会保留房间首次进入到初始 `load_level` 的片段（若已被成功片段完整包含则不重复输出），并在死亡后只从 `respawn` / `load_level(playerIntro=Respawn)` 接最终成功尝试；草莓房会记录 `strawberry_collect`，拿到草莓这一刻就算本次尝试成功，片段会在草莓收集时间点结束，后续死亡或离开不会再生成重复成功片段；一次录制跨多个地图时会按地图分别输出到对应地图名文件夹；房间切换处不再重复保留同一段转场画面；误回已通关上一个房间的来回折返会被剪掉，同时保留支路返回主房间的合法路线；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
+当前版本重点修复：剪辑区间改为按时间顺序单次线性扫描事件；首房间不会再被初始 `load_level` 截掉；每次 `room_enter -> load_level` 都会作为进房片段保留；死亡后的成功片段只从后续同房间 `load_level` 接到 `transition`、`strawberry_collect` 或 `level_complete`；草莓房会记录 `strawberry_collect`，拿到草莓这一刻就算本次尝试成功，并继续保留 `strawberry_collect -> first room_enter/exit`，中间即使发生 `death` 也不会截断这段尾巴；一次录制跨多个地图时会按地图分别输出到对应地图名文件夹；房间切换处不再重复保留同一段转场画面；折返抑制已移除，`A -> B -> A -> B` 这类路线会按普通房间事件处理；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
 
 ---
 
@@ -121,17 +121,20 @@ helper 工作目录：
 - 下一个房间不会再把 pre-roll 回卷到上一个房间；
 - `clip_intervals.json` 会记录 `adjacent_room_overlap_trimmed`，表示相邻片段已去重对齐。
 
-死亡房间的保留规则：
+当前保留区间算法：
 
-- 正常进房间的 `load_level(playerIntro=Transition)` 不会把房间开头截掉；
-- `death` / `load_end` 只标记本次尝试失败，不会再被当作成功片段起点；
-- `respawn` 或 `load_level(playerIntro=Respawn)` 才会作为死亡后成功尝试的起点；
-- 如果一个房间内发生死亡，会额外保留“本次进入房间 -> 初始 `load_level`”的片段，原因标记为 `room_entry_intro_before_clear`；
-- 同一地图 / 同一房间只要在本次录制里发生过死亡，若房间首次进入 -> 初始 `load_level` 没有已经被成功片段完整覆盖，也会补一条 `room_entry_intro_before_clear`，避免再访问死亡时丢掉最早进房画面；
-- `strawberry_collect` 表示草莓完成收集；拿到草莓这一刻就是成功终点，会生成“本次尝试起点 -> `strawberry_collect`”片段；同一次尝试后续的死亡、`transition` 或 `level_complete` 不会再生成第二条草莓成功片段；
-- 分支房间或同名房间再次进入时按每次 `room_enter` 独立处理，不会把上一次访问同名房间的死亡尾巴接到本次成功片段前；
-- 如果出现 `A -> B -> A -> B` 这种刚进当前房间又退回上一个已通关房间、随后再走回当前房间的折返，剪掉中间的 `B -> A` 失败片段和 `A -> B` 已清房间重走片段；
-- 如果是支路路线，例如 `Hub -> Side -> Hub -> Exit`，返回 Hub 后继续去新房间，不会被当成误回退剪掉。
+- helper 先按事件时间得到有序事件流，然后候选区间生成只使用一个向前游标；每个事件最多被扫描常数次，候选生成复杂度为 O(n)；
+- 每个 session 内，若出现 `session_start`，先保留 `session_start -> first room_enter`，原因标记为 `session_intro`；
+- 随后从当前 `room_enter` 开始，先保留 `room_enter -> load_level`，原因标记为 `room_entry_load`，并记录当前关卡身份（`MapSid + Room`）；
+- 对同一关卡向后贪心寻找第一个无死亡成功终点：
+  - `load_level -> transition`：保留为 `final_successful_attempt`，再保留 `transition -> first room_enter`，原因标记为 `transition_to_room_enter`；
+  - `load_level -> strawberry_collect`：保留为 `strawberry_collect_success`，再保留 `strawberry_collect -> first room_enter/exit`，原因标记为 `strawberry_collect_to_room_enter` 或 `strawberry_collect_to_exit`，这段尾巴中间允许出现 `death`；
+  - `load_level -> level_complete`：保留为 `final_successful_attempt`，然后等待下一个 session；
+  - `load_level -> exit`：不保留成功片段，直接跳到后续 session；
+- `death` / `load_end` 会使当前 `load_level` 失效；只有后续同一 `MapSid + Room` 的新 `load_level` 才能重新成为成功片段起点；
+- 不符合上述模式的事件不会生成片段，诊断会写入 `clip_intervals.json` 的 `warnings`，不会刷 Celeste 控制台；
+- 估算到 OBS 时间轴后，短于 50ms 的候选片段会标记为 `clip_too_short_for_video` 并排除，避免 1ms 片段只含音频、导致最终 ffmpeg 拼接失败；
+- 折返抑制已取消：`A -> B -> A -> B`、支路返回、同名房间再进入都按同一套线性事件规则处理。
 
 最终拼接规则：
 
@@ -211,6 +214,7 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 
 ```powershell
 ..\.dotnet\dotnet.exe run --project .\ObsClipSidecar\ObsClipSidecar.csproj -- self-test
+..\.dotnet\dotnet.exe build .\ObsClipPanel\ObsClipPanel.csproj -c Release
 ..\.dotnet\dotnet.exe publish .\CelesteAutoCut\CelesteAutoCut.csproj -c Release
 ```
 
@@ -219,11 +223,12 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 - 首房间初始 `Transition load_level` 不截断房间开头；
 - 死亡房间保留“进入房间 -> 初始 `load_level`”，成功片段从 `Respawn` 开始而不是从 `death` 开始；
 - 分支后再次进入同名房间时，每次访问独立生成片段；
-- 误回上一个已通关房间后又立刻回到当前房间的折返会被剪掉；
+- 折返抑制已取消，来回折返会按普通 `room_enter/load_level/transition` 事件生成片段；
 - 支路返回 Hub 后继续前进的路线会被保留；
+- `load_level -> level_complete` 会作为最终通关片段保留；
 - 一次录制中多个地图 SID 会拆成多个独立输出；
 - 多地图输出路径发生冲突时会自动加地图子文件夹避免覆盖；
-- 草莓房要保留“本次尝试起点 -> 拿草莓”，并确认拿草莓后的死亡或离开不会生成重复成功片段；
+- 草莓房要保留“本次 `load_level` -> 拿草莓”，并确认 `strawberry_collect -> first room_enter/exit` 中间允许死亡且不会生成重复成功片段；
 - 精确拼接模式的最终 concat 会重新编码，避免输出视频时间戳异常膨胀。
 
 真实环境脚本：
