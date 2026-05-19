@@ -2,8 +2,6 @@ namespace ObsClipSidecar;
 
 public sealed class IntervalGenerator
 {
-    private const long MinimumVideoClipDurationMs = 50;
-
     public ClipIntervalsDocument Generate(IReadOnlyList<RoomEvent> roomEvents, SessionManifest manifest, IntervalGenerationOptions? options = null)
     {
         options ??= new IntervalGenerationOptions();
@@ -26,7 +24,7 @@ public sealed class IntervalGenerator
             .Select(x => x.Event)
             .ToList();
 
-        var candidates = BuildLinearKeepCandidates(sortedEvents, warnings)
+        var candidates = MergeAdjacentKeepCandidates(BuildLinearKeepCandidates(sortedEvents, warnings))
             .Select((c, index) => c with { Index = index })
             .ToList();
         var prepared = new List<PreparedClip>();
@@ -87,13 +85,6 @@ public sealed class IntervalGenerator
             if (clip.EndMs <= clip.StartMs)
             {
                 reasons.Add("non_positive_clip_duration");
-                AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, reasons, invalid, clip.StartMs, clip.EndMs);
-                continue;
-            }
-
-            if (clip.EndMs - clip.StartMs < MinimumVideoClipDurationMs)
-            {
-                reasons.Add("clip_too_short_for_video");
                 AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, reasons, invalid, clip.StartMs, clip.EndMs);
                 continue;
             }
@@ -333,13 +324,15 @@ public sealed class IntervalGenerator
                         if (activeLoad is not null && level.Matches(current))
                         {
                             AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "final_successful_attempt", false);
+                            i++;
+                            KeepLevelCompleteTail(events, ref i, current, warnings, result, ref index);
                         }
                         else
                         {
                             warnings.Add(DiscardWarning("linear_discard_level_complete_without_live_load", current));
+                            i++;
                         }
 
-                        i++;
                         sessionDone = true;
                         break;
                     }
@@ -356,6 +349,62 @@ public sealed class IntervalGenerator
         }
 
         return result;
+    }
+
+    private static List<ClipCandidate> MergeAdjacentKeepCandidates(IReadOnlyList<ClipCandidate> candidates)
+    {
+        if (candidates.Count <= 1)
+        {
+            return candidates.ToList();
+        }
+
+        var result = new List<ClipCandidate>();
+        foreach (var candidate in candidates.OrderBy(c => c.Start.Utc).ThenBy(c => c.End.Utc).ThenBy(c => c.Index))
+        {
+            if (result.Count == 0)
+            {
+                result.Add(candidate);
+                continue;
+            }
+
+            var previous = result[^1];
+            if (CanMergeAdjacent(previous, candidate))
+            {
+                result[^1] = previous with
+                {
+                    End = candidate.End,
+                    Room = string.IsNullOrWhiteSpace(previous.Room) ? candidate.Room : previous.Room,
+                    MapSid = previous.MapSid ?? candidate.MapSid,
+                    BaseValidReason = BuildMergedReason(previous.BaseValidReason, candidate.BaseValidReason),
+                    IsCheckpointIntro = previous.IsCheckpointIntro && candidate.IsCheckpointIntro
+                };
+                continue;
+            }
+
+            result.Add(candidate);
+        }
+
+        return result;
+    }
+
+    private static bool CanMergeAdjacent(ClipCandidate previous, ClipCandidate current)
+        => previous.End.Utc == current.Start.Utc &&
+           string.Equals(previous.MapSid ?? string.Empty, current.MapSid ?? string.Empty, StringComparison.Ordinal);
+
+    private static string BuildMergedReason(string previous, string current)
+    {
+        if (string.Equals(previous, current, StringComparison.Ordinal))
+        {
+            return previous;
+        }
+
+        if (string.Equals(previous, "merged_linear_interval", StringComparison.Ordinal) ||
+            string.Equals(current, "merged_linear_interval", StringComparison.Ordinal))
+        {
+            return "merged_linear_interval";
+        }
+
+        return "merged_linear_interval";
     }
 
     private static bool TryReadRoomEntryLoad(
@@ -473,6 +522,42 @@ public sealed class IntervalGenerator
 
         warnings.Add(DiscardWarning("linear_discard_missing_room_enter_or_exit_after_strawberry", strawberry));
         return true;
+    }
+
+    private static void KeepLevelCompleteTail(
+        IReadOnlyList<RoomEvent> events,
+        ref int i,
+        RoomEvent levelComplete,
+        List<string> warnings,
+        List<ClipCandidate> result,
+        ref int index)
+    {
+        while (i < events.Count)
+        {
+            var current = events[i];
+            if (IsExitLike(current))
+            {
+                AddCandidate(result, ref index, levelComplete, current, levelComplete.Room ?? current.Room ?? "room", levelComplete.MapSid ?? current.MapSid, "level_complete_to_exit", true);
+                i++;
+                return;
+            }
+
+            if (IsSessionStart(current) || IsSessionEnd(current))
+            {
+                warnings.Add(DiscardWarning("linear_discard_missing_exit_after_level_complete", levelComplete));
+                return;
+            }
+
+            if (IsRoomEntry(current))
+            {
+                warnings.Add(DiscardWarning("linear_discard_room_enter_after_level_complete_before_exit", current));
+                return;
+            }
+
+            i++;
+        }
+
+        warnings.Add(DiscardWarning("linear_discard_missing_exit_after_level_complete", levelComplete));
     }
 
     private static void AddCandidate(List<ClipCandidate> result, ref int index, RoomEvent start, RoomEvent end, string room, string? mapSid, string reason, bool isCheckpointIntro)

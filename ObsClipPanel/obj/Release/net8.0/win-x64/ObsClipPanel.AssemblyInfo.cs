@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ObsClipPanel")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4ca3c1f147c070ce14f0e022771047e3c7f93e75")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8ae24c5335560ced01cafbff8e28e882f628b221")]
 [assembly: System.Reflection.AssemblyProductAttribute("ObsClipPanel")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ObsClipPanel")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

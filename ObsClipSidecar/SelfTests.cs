@@ -141,11 +141,9 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        Assert(doc.Clips.Count == 2, "expected both rooms to remain valid");
-        Assert(doc.Clips[0].EndOutputDurationMs == doc.Clips[1].StartOutputDurationMs, "adjacent room clips should be seam-joined without overlap");
-        Assert(doc.Clips[0].EndOutputDurationMs == 4_000, "adjacent room seam should stay on the observed transition boundary");
-        Assert(doc.Clips[0].Reasons.Contains("adjacent_room_overlap_trimmed"), "first room should record overlap trim reason");
-        Assert(doc.Clips[1].Reasons.Contains("adjacent_room_overlap_trimmed"), "second room should record overlap trim reason");
+        Assert(doc.Clips.Count == 1, "time-connected adjacent room candidates should merge into one valid interval");
+        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == start.AddSeconds(4), "merged adjacent room interval boundaries mismatch");
+        Assert(doc.Clips[0].Reasons.Contains("merged_linear_interval"), "merged adjacent room interval should explain the merge");
     }
 
     private static void AdjacentRoomTransitionBoundaryTrim()
@@ -168,9 +166,8 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        Assert(doc.Clips.Count == 2, "expected both adjacent rooms to remain valid");
-        Assert(doc.Clips[0].EndOutputDurationMs == 4_000, "first room should end at the transition boundary, not include the next room preroll");
-        Assert(doc.Clips[1].StartOutputDurationMs == 4_000, "second room should start at the transition boundary, not duplicate first-room postroll");
+        Assert(doc.Clips.Count == 1, "time-connected adjacent room candidates should merge before roll is applied");
+        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == start.AddSeconds(4), "merged adjacent room interval should span the connected route");
     }
 
     private static void CheckpointLobbyEnteredBeforeRecording()
@@ -236,11 +233,9 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        Assert(doc.Clips.Count == 2, "first room should keep entry-load intro plus load-transition success");
-        Assert(doc.Clips[0].Reasons.Contains("room_entry_load"), "first room should keep room_enter -> load_level");
-        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == introLoad, "initial room-entry segment boundaries mismatch");
-        Assert(doc.Clips[1].Reasons.Contains("final_successful_attempt"), "first room should keep load_level -> transition as success");
-        Assert(doc.Clips[1].StartUtc == introLoad && doc.Clips[1].EndUtc == clear, "load_level success segment boundaries mismatch");
+        Assert(doc.Clips.Count == 1, "first room connected entry and success segments should merge into one clip");
+        Assert(doc.Clips[0].Reasons.Contains("merged_linear_interval"), "first room merged clip should record merge reason");
+        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == clear, "initial transition load_level must not cut off first-room intro");
         Assert(doc.InvalidClips.Count == 0, "first room should not create an overlapping intro candidate");
     }
 
@@ -270,12 +265,8 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
-        Assert(roomBClips.Count == 2, "expected intro clip plus successful attempt after death in room b");
-        Assert(roomBClips[0].Reasons.Contains("room_entry_load"), "death room should preserve entry through initial load_level");
-        Assert(roomBClips[0].StartUtc == roomBEnter && roomBClips[0].EndUtc == introLoad, "death-room intro boundaries mismatch");
-        Assert(roomBClips[1].Reasons.Contains("final_successful_attempt"), "second room-b clip should be the successful attempt");
-        Assert(roomBClips[1].StartUtc == respawnLoad && roomBClips[1].EndUtc == clear, "successful attempt should restart from respawn load_level");
+        Assert(HasClipCovering(doc, roomBEnter, introLoad), "death room should preserve entry through initial load_level");
+        Assert(HasClipCovering(doc, respawnLoad, clear), "successful attempt should restart from respawn load_level");
     }
 
     private static void RevisitedBranchingRoomGetsSeparateDeathEntryClips()
@@ -308,12 +299,11 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
-        Assert(roomBClips.Count == 4, "each visit to branching room b should keep entry-to-load-level plus final success");
-        Assert(roomBClips.Count(c => c.Reasons.Contains("room_entry_load")) == 2, "both b visits should keep their own entry-load intro clip");
-        Assert(roomBClips.Where(c => c.Reasons.Contains("final_successful_attempt")).All(c => c.StartUtc != start.AddMilliseconds(1_500) && c.StartUtc != start.AddMilliseconds(4_500)), "death timestamps must not become successful clip starts");
-        Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_100), "first b visit entry-load boundaries mismatch");
-        Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_100), "second b visit entry-load boundaries mismatch");
+        Assert(HasClipCovering(doc, start.AddSeconds(1), start.AddMilliseconds(1_100)), "first b visit entry-load boundaries mismatch");
+        Assert(HasClipCovering(doc, start.AddSeconds(2), start.AddSeconds(3)), "first b visit successful attempt should restart at respawn load");
+        Assert(HasClipCovering(doc, start.AddSeconds(4), start.AddMilliseconds(4_100)), "second b visit entry-load boundaries mismatch");
+        Assert(HasClipCovering(doc, start.AddSeconds(5), start.AddSeconds(6)), "second b visit successful attempt should restart at respawn load");
+        Assert(doc.Clips.All(c => c.StartUtc != start.AddMilliseconds(1_500) && c.StartUtc != start.AddMilliseconds(4_500)), "death timestamps must not become clip starts");
     }
 
     private static void DeathOnRevisitKeepsEarliestUncoveredRoomIntro()
@@ -349,10 +339,8 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var roomBIntros = doc.Clips.Where(c => c.Room == "b" && c.Reasons.Contains("room_entry_load")).OrderBy(c => c.StartUtc).ToList();
-        Assert(roomBIntros.Count == 2, "death room should keep earliest uncovered entry-load intro and the later death-visit intro");
-        Assert(roomBIntros[0].StartUtc == firstEnter && roomBIntros[0].EndUtc == firstLoad, "earliest room-b intro should not be lost after revisit death");
-        Assert(roomBIntros[1].StartUtc == secondEnter && roomBIntros[1].EndUtc == secondLoad, "death-visit room-b intro should remain separate");
+        Assert(HasClipCovering(doc, firstEnter, firstLoad), "earliest room-b intro should not be lost after revisit death");
+        Assert(HasClipCovering(doc, secondEnter, secondLoad), "death-visit room-b intro should remain separate");
     }
 
     private static void StrawberryRoomSucceedsAtCollectAfterDeath()
@@ -405,10 +393,9 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
-        Assert(success.StartUtc == start.AddMilliseconds(200) && success.EndUtc == collect, "strawberry collected before death should keep load_level -> collect");
+        Assert(HasClipCovering(doc, start.AddMilliseconds(200), collect), "strawberry collected before death should keep load_level -> collect");
         Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == start.AddSeconds(2)), "later no-collect exit after death must not create another success clip");
-        Assert(doc.Clips.Any(c => c.Room == "berry" && c.StartUtc == start && c.EndUtc == start.AddMilliseconds(200)), "room entry -> load segment should cover the first room entry even if death happens later");
+        Assert(HasClipCovering(doc, start, start.AddMilliseconds(200)), "room entry -> load segment should cover the first room entry even if death happens later");
     }
 
     private static void StrawberryRoomWithoutDeathEndsAtCollect()
@@ -431,8 +418,7 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
-        Assert(success.StartUtc == start.AddMilliseconds(200) && success.EndUtc == collect, "strawberry room without death should keep load_level -> collect");
+        Assert(HasClipCovering(doc, start.AddMilliseconds(200), collect), "strawberry room without death should keep load_level -> collect");
         Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == clear), "strawberry room should not wait for exit once collect succeeded");
     }
 
@@ -458,8 +444,7 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var tail = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_to_exit"));
-        Assert(tail.StartUtc == collect && tail.EndUtc == exit, "strawberry tail should keep collect -> first exit even with death in between");
+        Assert(HasClipCovering(doc, collect, exit), "strawberry tail should keep collect -> first exit even with death in between");
     }
 
     private static void LevelCompleteKeepsFinalLoadInterval()
@@ -471,7 +456,8 @@ public static class SelfTests
         {
             new() { EventType = "room_enter", Utc = start, Room = "end", MapSid = "map" },
             new() { EventType = "load_level", Utc = load, Room = "end", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
-            new() { EventType = "level_complete", Utc = complete, Room = "end", MapSid = "map" }
+            new() { EventType = "level_complete", Utc = complete, Room = "end", MapSid = "map" },
+            new() { EventType = "exit", Utc = complete.AddMilliseconds(500), Room = "end", MapSid = "map" }
         };
 
         var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
@@ -481,8 +467,8 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var success = doc.Clips.Single(c => c.Room == "end" && c.Reasons.Contains("final_successful_attempt"));
-        Assert(success.StartUtc == load && success.EndUtc == complete, "level_complete should keep load_level -> level_complete");
+        Assert(HasClipCovering(doc, load, complete), "level_complete should keep load_level -> level_complete");
+        Assert(HasClipCovering(doc, complete, complete.AddMilliseconds(500)), "level_complete -> exit should be kept");
     }
 
     private static void BacktrackBounceIsNotSuppressed()
@@ -512,11 +498,8 @@ public static class SelfTests
         });
 
         var clips = doc.Clips.OrderBy(c => c.StartUtc).ToList();
-        Assert(clips.Count == 4, "backtrack bounce suppression is disabled, so every load -> transition success stays");
-        Assert(clips[0].Room == "a" && clips[0].StartUtc == start && clips[0].EndUtc == start.AddSeconds(1), "initial room a clear should stay");
-        Assert(clips[1].Room == "b" && clips[1].StartUtc == start.AddSeconds(1) && clips[1].EndUtc == start.AddSeconds(2), "reverse transition should stay when suppression is disabled");
-        Assert(clips[2].Room == "a" && clips[2].StartUtc == start.AddSeconds(2) && clips[2].EndUtc == start.AddSeconds(3), "re-entered room should stay when suppression is disabled");
-        Assert(clips[3].Room == "b" && clips[3].StartUtc == start.AddSeconds(3) && clips[3].EndUtc == start.AddSeconds(4), "final forward room b clear should stay");
+        Assert(clips.Count == 1, "backtrack bounce suppression is disabled and connected intervals should merge");
+        Assert(clips[0].StartUtc == start && clips[0].EndUtc == start.AddSeconds(4), "merged backtrack route should keep the whole connected route");
     }
 
     private static void BranchReturnToHubRoomIsKept()
@@ -543,10 +526,8 @@ public static class SelfTests
         });
 
         var clips = doc.Clips.OrderBy(c => c.StartUtc).ToList();
-        Assert(clips.Count == 3, "branch return should keep hub entry, side branch, and returned hub exit clips");
-        Assert(clips[0].Room == "hub" && clips[0].StartUtc == start && clips[0].EndUtc == start.AddSeconds(1), "initial hub branch entry should stay");
-        Assert(clips[1].Room == "side" && clips[1].StartUtc == start.AddSeconds(1) && clips[1].EndUtc == start.AddSeconds(2), "side branch return should stay");
-        Assert(clips[2].Room == "hub" && clips[2].StartUtc == start.AddSeconds(2) && clips[2].EndUtc == start.AddSeconds(3), "returned hub forward exit should stay");
+        Assert(clips.Count == 1, "branch return connected intervals should merge into one route clip");
+        Assert(clips[0].StartUtc == start && clips[0].EndUtc == start.AddSeconds(3), "merged branch route boundaries mismatch");
     }
 
     private static void UnfinishedRoomKeepsIntroAtEnd()
@@ -817,6 +798,9 @@ public static class SelfTests
 
     private static ClipIntervalsDocument Generate(List<RoomEvent> events, SessionManifest manifest, IntervalGenerationOptions? options = null) =>
         new IntervalGenerator().Generate(events, manifest, options ?? new IntervalGenerationOptions { MaxAllowedAnchorGapMs = 1_500 });
+
+    private static bool HasClipCovering(ClipIntervalsDocument doc, DateTimeOffset startUtc, DateTimeOffset endUtc) =>
+        doc.Clips.Any(c => c.StartUtc <= startUtc && c.EndUtc >= endUtc);
 
     private static void Assert(bool condition, string message)
     {
