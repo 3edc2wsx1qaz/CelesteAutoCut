@@ -20,9 +20,9 @@ public static class SelfTests
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
             ("revisited branching room gets separate death entry clips", RevisitedBranchingRoomGetsSeparateDeathEntryClips),
             ("death on revisit still keeps earliest uncovered room intro", DeathOnRevisitKeepsEarliestUncoveredRoomIntro),
-            ("strawberry room keeps collect-and-exit attempt after death", StrawberryRoomKeepsCollectedAttemptAfterDeath),
-            ("strawberry before death does not authorize later exit", StrawberryBeforeDeathDoesNotAuthorizeLaterExit),
-            ("strawberry room without death keeps entry through exit", StrawberryRoomWithoutDeathKeepsEntryThroughExit),
+            ("strawberry room succeeds at collect after death", StrawberryRoomSucceedsAtCollectAfterDeath),
+            ("strawberry before death is kept at collect only", StrawberryBeforeDeathIsKeptAtCollectOnly),
+            ("strawberry room without death ends at collect", StrawberryRoomWithoutDeathEndsAtCollect),
             ("accidental backtrack to cleared previous room is cut", AccidentalBacktrackToClearedPreviousRoomIsCut),
             ("branch return to hub room is kept", BranchReturnToHubRoomIsKept),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
@@ -341,7 +341,7 @@ public static class SelfTests
         Assert(roomBIntros[1].StartUtc == secondEnter && roomBIntros[1].EndUtc == secondLoad, "death-visit room-b intro should remain separate");
     }
 
-    private static void StrawberryRoomKeepsCollectedAttemptAfterDeath()
+    private static void StrawberryRoomSucceedsAtCollectAfterDeath()
     {
         var start = BaseUtc.AddSeconds(2);
         var respawnLoad = start.AddSeconds(1);
@@ -364,19 +364,21 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("final_successful_attempt"));
-        Assert(success.StartUtc == respawnLoad && success.EndUtc == clear, "strawberry success after death should start from respawn/load_level and include collect-to-exit");
+        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
+        Assert(success.StartUtc == respawnLoad && success.EndUtc == collect, "strawberry success after death should start from respawn/load_level and end at collect");
+        Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == clear), "strawberry transition after collect should not create a second success clip");
         Assert(doc.Clips.Any(c => c.Room == "berry" && c.Reasons.Contains("room_entry_intro_before_clear")), "death strawberry room should still keep entry-load intro");
     }
 
-    private static void StrawberryBeforeDeathDoesNotAuthorizeLaterExit()
+    private static void StrawberryBeforeDeathIsKeptAtCollectOnly()
     {
         var start = BaseUtc.AddSeconds(2);
+        var collect = start.AddMilliseconds(500);
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "berry", MapSid = "map" },
             new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
-            new() { EventType = "strawberry_collect", Utc = start.AddMilliseconds(500), Room = "berry", MapSid = "map" },
+            new() { EventType = "strawberry_collect", Utc = collect, Room = "berry", MapSid = "map" },
             new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "berry", MapSid = "map" },
             new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "berry", NextRoom = "next", MapSid = "map" }
@@ -389,19 +391,22 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        Assert(!doc.Clips.Any(c => c.Room == "berry" && c.Reasons.Contains("final_successful_attempt")), "strawberry collected before death must not make a later no-collect exit successful");
-        Assert(doc.Clips.Single(c => c.Room == "berry").Reasons.Contains("room_entry_intro_before_clear"), "only the death-room intro should remain");
+        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
+        Assert(success.StartUtc == start && success.EndUtc == collect, "strawberry collected before death should still be kept through collect");
+        Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == start.AddSeconds(2)), "later no-collect exit after death must not create another success clip");
+        Assert(doc.Clips.Any(c => c.Room == "berry" && c.StartUtc == start && c.EndUtc == collect), "collect-success clip should cover the first room entry segment even if death happens later");
     }
 
-    private static void StrawberryRoomWithoutDeathKeepsEntryThroughExit()
+    private static void StrawberryRoomWithoutDeathEndsAtCollect()
     {
         var start = BaseUtc.AddSeconds(2);
+        var collect = start.AddSeconds(1);
         var clear = start.AddSeconds(2);
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "berry", MapSid = "map" },
             new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
-            new() { EventType = "strawberry_collect", Utc = start.AddSeconds(1), Room = "berry", MapSid = "map" },
+            new() { EventType = "strawberry_collect", Utc = collect, Room = "berry", MapSid = "map" },
             new() { EventType = "transition", Utc = clear, Room = "berry", NextRoom = "next", MapSid = "map" }
         };
 
@@ -412,8 +417,9 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("final_successful_attempt"));
-        Assert(success.StartUtc == start && success.EndUtc == clear, "strawberry room without death should keep entry -> collect -> exit");
+        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
+        Assert(success.StartUtc == start && success.EndUtc == collect, "strawberry room without death should keep entry -> collect");
+        Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == clear), "strawberry room should not wait for exit once collect succeeded");
     }
 
     private static void AccidentalBacktrackToClearedPreviousRoomIsCut()

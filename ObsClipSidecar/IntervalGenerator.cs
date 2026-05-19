@@ -253,7 +253,13 @@ public sealed class IntervalGenerator
             if (IsStrawberryCollect(e) && currentRoomStart is not null && SameRoom(currentRoomStart, e))
             {
                 currentVisitSawStrawberry = true;
-                attemptCollectedStrawberry = true;
+                if (attemptStart is not null)
+                {
+                    result.Add(new ClipCandidate(index++, attemptStart, e, currentRoomStart.Room ?? e.Room ?? "room", currentRoomStart.MapSid ?? e.MapSid, "strawberry_collect_success", false));
+                }
+
+                attemptStart = null;
+                attemptCollectedStrawberry = false;
             }
         }
 
