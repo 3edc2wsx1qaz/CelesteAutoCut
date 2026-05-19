@@ -24,8 +24,9 @@ public sealed class IntervalGenerator
             .Select(x => x.Event)
             .ToList();
 
-        var candidates = BuildSuccessfulAttemptCandidates(sortedEvents)
-            .Concat(BuildCheckpointIntroCandidates(sortedEvents))
+        var suppressedBacktrackTransitions = FindAccidentalBacktrackTransitions(sortedEvents);
+        var candidates = BuildSuccessfulAttemptCandidates(sortedEvents, suppressedBacktrackTransitions)
+            .Concat(BuildCheckpointIntroCandidates(sortedEvents, suppressedBacktrackTransitions))
             .OrderBy(c => c.Start.Utc)
             .ThenBy(c => c.End.Utc)
             .ThenBy(c => c.Start.GameFrame ?? long.MaxValue)
@@ -153,7 +154,7 @@ public sealed class IntervalGenerator
         };
     }
 
-    private static List<ClipCandidate> BuildSuccessfulAttemptCandidates(IReadOnlyList<RoomEvent> events)
+    private static List<ClipCandidate> BuildSuccessfulAttemptCandidates(IReadOnlyList<RoomEvent> events, IReadOnlySet<RoomEvent> suppressedTransitions)
     {
         var result = new List<ClipCandidate>();
         RoomEvent? currentRoomStart = null;
@@ -173,7 +174,7 @@ public sealed class IntervalGenerator
 
             if (e.EventType is "transition")
             {
-                if (currentRoomStart is not null && attemptStart is not null)
+                if (currentRoomStart is not null && attemptStart is not null && !suppressedTransitions.Contains(e))
                 {
                     result.Add(new ClipCandidate(index++, attemptStart, e, currentRoomStart.Room ?? e.Room ?? "room", currentRoomStart.MapSid ?? e.MapSid, "final_successful_attempt", false));
                 }
@@ -234,7 +235,7 @@ public sealed class IntervalGenerator
         return result;
     }
 
-    private static List<ClipCandidate> BuildCheckpointIntroCandidates(IReadOnlyList<RoomEvent> events)
+    private static List<ClipCandidate> BuildCheckpointIntroCandidates(IReadOnlyList<RoomEvent> events, IReadOnlySet<RoomEvent> suppressedTransitions)
     {
         var result = new List<ClipCandidate>();
         RoomLifecycle? current = null;
@@ -269,7 +270,8 @@ public sealed class IntervalGenerator
             {
                 if (current.InitialCheckpoint is not null &&
                     SameRoom(current.Entry, e) &&
-                    current.HadDeath)
+                    current.HadDeath &&
+                    !suppressedTransitions.Contains(e))
                 {
                     result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_before_clear", true));
                 }
@@ -290,6 +292,28 @@ public sealed class IntervalGenerator
         }
 
         return result;
+    }
+
+    private static HashSet<RoomEvent> FindAccidentalBacktrackTransitions(IReadOnlyList<RoomEvent> events)
+    {
+        var suppressed = new HashSet<RoomEvent>(ReferenceEqualityComparer.Instance);
+        var transitions = events
+            .Where(e => e.EventType is "transition" && !string.IsNullOrWhiteSpace(e.Room) && !string.IsNullOrWhiteSpace(e.NextRoom))
+            .ToList();
+
+        for (var i = 0; i + 2 < transitions.Count; i++)
+        {
+            var forward = transitions[i];
+            var reversed = transitions[i + 1];
+            var returnForward = transitions[i + 2];
+            if (IsReverseTransition(forward, reversed) && IsSameDirectedTransition(forward, returnForward))
+            {
+                suppressed.Add(reversed);
+                suppressed.Add(returnForward);
+            }
+        }
+
+        return suppressed;
     }
 
     private static void TrimAdjacentRoomOverlaps(List<PreparedClip> clips)
@@ -564,6 +588,19 @@ public sealed class IntervalGenerator
 
     private static bool IsRespawnLoadLevel(RoomEvent loadLevel)
         => string.Equals(GetNoteString(loadLevel, "playerIntro"), "Respawn", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsReverseTransition(RoomEvent forward, RoomEvent reversed)
+        => SameMap(forward, reversed) &&
+           string.Equals(forward.Room ?? string.Empty, reversed.NextRoom ?? string.Empty, StringComparison.Ordinal) &&
+           string.Equals(forward.NextRoom ?? string.Empty, reversed.Room ?? string.Empty, StringComparison.Ordinal);
+
+    private static bool IsSameDirectedTransition(RoomEvent left, RoomEvent right)
+        => SameMap(left, right) &&
+           string.Equals(left.Room ?? string.Empty, right.Room ?? string.Empty, StringComparison.Ordinal) &&
+           string.Equals(left.NextRoom ?? string.Empty, right.NextRoom ?? string.Empty, StringComparison.Ordinal);
+
+    private static bool SameMap(RoomEvent left, RoomEvent right)
+        => string.Equals(left.MapSid ?? string.Empty, right.MapSid ?? string.Empty, StringComparison.Ordinal);
 
     private static bool SameRoom(RoomEvent left, RoomEvent right)
         => string.Equals(left.Room ?? string.Empty, right.Room ?? string.Empty, StringComparison.Ordinal);

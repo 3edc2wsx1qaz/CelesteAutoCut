@@ -19,6 +19,8 @@ public static class SelfTests
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
             ("revisited branching room gets separate death entry clips", RevisitedBranchingRoomGetsSeparateDeathEntryClips),
+            ("accidental backtrack to cleared previous room is cut", AccidentalBacktrackToClearedPreviousRoomIsCut),
+            ("branch return to hub room is kept", BranchReturnToHubRoomIsKept),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
             ("invalid anchor gaps are reported", InvalidAnchorGap),
@@ -296,6 +298,63 @@ public static class SelfTests
         Assert(roomBClips.Where(c => c.Reasons.Contains("final_successful_attempt")).All(c => c.StartUtc != start.AddMilliseconds(1_500) && c.StartUtc != start.AddMilliseconds(4_500)), "death timestamps must not become successful clip starts");
         Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_010), "first b visit entry-load boundaries mismatch");
         Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_010), "second b visit entry-load boundaries mismatch");
+    }
+
+    private static void AccidentalBacktrackToClearedPreviousRoomIsCut()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(1), Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(1), Room = "b", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "b", NextRoom = "a", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "a", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(3), Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(3), Room = "b", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(4), Room = "b", NextRoom = "c", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var clips = doc.Clips.OrderBy(c => c.StartUtc).ToList();
+        Assert(clips.Count == 2, "backtrack bounce should keep only the original cleared room and the later forward clear");
+        Assert(clips[0].Room == "a" && clips[0].StartUtc == start && clips[0].EndUtc == start.AddSeconds(1), "initial room a clear should stay");
+        Assert(clips[1].Room == "b" && clips[1].StartUtc == start.AddSeconds(3) && clips[1].EndUtc == start.AddSeconds(4), "room b should restart after returning from accidental backtrack");
+        Assert(!doc.Clips.Any(c => c.Room == "a" && c.StartUtc == start.AddSeconds(2)), "already-cleared room revisit should be cut");
+        Assert(!doc.Clips.Any(c => c.Room == "b" && c.EndUtc == start.AddSeconds(2)), "failed transition back to previous cleared room should be cut");
+    }
+
+    private static void BranchReturnToHubRoomIsKept()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "hub", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(1), Room = "hub", NextRoom = "side", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(1), Room = "side", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "side", NextRoom = "hub", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "hub", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(3), Room = "hub", NextRoom = "exit", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var clips = doc.Clips.OrderBy(c => c.StartUtc).ToList();
+        Assert(clips.Count == 3, "branch return should keep hub entry, side branch, and returned hub exit clips");
+        Assert(clips[0].Room == "hub" && clips[0].StartUtc == start && clips[0].EndUtc == start.AddSeconds(1), "initial hub branch entry should stay");
+        Assert(clips[1].Room == "side" && clips[1].StartUtc == start.AddSeconds(1) && clips[1].EndUtc == start.AddSeconds(2), "side branch return should stay");
+        Assert(clips[2].Room == "hub" && clips[2].StartUtc == start.AddSeconds(2) && clips[2].EndUtc == start.AddSeconds(3), "returned hub forward exit should stay");
     }
 
     private static void UnfinishedRoomKeepsIntroAtEnd()
