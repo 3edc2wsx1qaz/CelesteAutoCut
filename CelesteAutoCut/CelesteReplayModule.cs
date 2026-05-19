@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using Celeste;
 using Celeste.Mod;
 using Microsoft.Xna.Framework.Input;
@@ -17,6 +16,7 @@ public sealed class CelesteAutoCutModule : EverestModule {
     private readonly ObsAutoAssemblerLauncher obsAutoAssemblerLauncher;
     private KeyboardState previousRawKeyboard;
     private bool obsAutoAssemblerStartPending;
+    private bool observedLevelSceneLastFrame;
     private int obsAutoAssemblerReadyFrames;
     private const int ObsAutoAssemblerStartupDelayFrames = 30;
 
@@ -32,66 +32,16 @@ public sealed class CelesteAutoCutModule : EverestModule {
     public override void Load() {
         obsAutoAssemblerStartPending = true;
         On.Monocle.MInput.Update += OnMInputUpdate;
-        Everest.Events.Level.OnEnter += OnEnter;
-        Everest.Events.Level.OnLoadLevel += OnLoadLevel;
-        Everest.Events.Level.OnTransitionTo += OnTransitionTo;
-        Everest.Events.Level.OnComplete += OnComplete;
-        Everest.Events.Level.OnExit += OnExit;
         Everest.Events.Player.OnDie += OnPlayerDie;
     }
 
     public override void Unload() {
         On.Monocle.MInput.Update -= OnMInputUpdate;
-        Everest.Events.Level.OnEnter -= OnEnter;
-        Everest.Events.Level.OnLoadLevel -= OnLoadLevel;
-        Everest.Events.Level.OnTransitionTo -= OnTransitionTo;
-        Everest.Events.Level.OnComplete -= OnComplete;
-        Everest.Events.Level.OnExit -= OnExit;
         Everest.Events.Player.OnDie -= OnPlayerDie;
         controller.Stop();
         successfulClearRecorder.Stop(discard: true);
         roomClipRecorder.Shutdown();
         obsAutoAssemblerLauncher.Stop();
-    }
-
-    private void OnEnter(Session session, bool fromSaveData) {
-        if (Settings.Enabled) {
-            successfulClearRecorder.Start(session);
-            roomClipRecorder.Start(session, fromSaveData);
-        }
-    }
-
-    private void OnLoadLevel(Level level, Player.IntroTypes playerIntro, bool isFromLoader) {
-        if (Settings.Enabled && !roomClipRecorder.Active) {
-            roomClipRecorder.Start(level.Session, fromSaveData: false);
-        }
-
-        if (Settings.Enabled && Settings.AutoRecordOnLevelStart && isFromLoader) {
-            controller.StartRecording();
-        }
-
-        if (Settings.Enabled) {
-            roomClipRecorder.OnLoadLevel(level, playerIntro, isFromLoader);
-        }
-    }
-
-    private void OnTransitionTo(Level level, LevelData nextLevelData, Microsoft.Xna.Framework.Vector2 direction) {
-        if (Settings.Enabled) {
-            successfulClearRecorder.OnTransitionTo(nextLevelData);
-            roomClipRecorder.OnTransitionTo(level, nextLevelData, direction);
-        }
-    }
-
-    private void OnComplete(Level level) {
-        if (Settings.Enabled) {
-            successfulClearRecorder.OnChapterComplete(level);
-            roomClipRecorder.OnComplete(level);
-        }
-    }
-
-    private void OnExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session, HiresSnow snow) {
-        successfulClearRecorder.Stop(discard: true);
-        roomClipRecorder.OnExit(level, exit, mode, session);
     }
 
     private void OnPlayerDie(Player player) {
@@ -129,7 +79,29 @@ public sealed class CelesteAutoCutModule : EverestModule {
         }
 
         successfulClearRecorder.RecordFrame();
+        ObserveGameState();
         roomClipRecorder.TickFrame();
+    }
+
+    private void ObserveGameState() {
+        if (Engine.Scene is Level level) {
+            bool chapterComplete = RuntimeLevelState.IsChapterComplete(level);
+            roomClipRecorder.ObserveLevel(level, chapterComplete);
+            successfulClearRecorder.ObserveLevel(level, chapterComplete);
+
+            if (Settings.AutoRecordOnLevelStart && controller.Mode == ReplayMode.Idle && !observedLevelSceneLastFrame) {
+                controller.StartRecording();
+            }
+
+            observedLevelSceneLastFrame = true;
+            return;
+        }
+
+        if (observedLevelSceneLastFrame) {
+            roomClipRecorder.ObserveExitedLevel("scene_changed");
+            successfulClearRecorder.ObserveExitedLevel();
+            observedLevelSceneLastFrame = false;
+        }
     }
 
     private void HandleHotkeys() {
@@ -148,12 +120,6 @@ public sealed class CelesteAutoCutModule : EverestModule {
 
     private bool Pressed(KeyboardState current, Keys key) {
         return key != Keys.None && current.IsKeyDown(key) && !previousRawKeyboard.IsKeyDown(key);
-    }
-
-    internal static IEnumerable<Keys> HotkeyKeys() {
-        yield return Settings.ToggleRecordingKey;
-        yield return Settings.PlayKey;
-        yield return Settings.StopKey;
     }
 
     [Command("replay_record", "Start or stop CelesteAutoCut recording.")]
@@ -189,3 +155,28 @@ public sealed class CelesteAutoCutModule : EverestModule {
     }
 }
 
+internal static class RuntimeLevelState {
+    private const System.Reflection.BindingFlags Flags =
+        System.Reflection.BindingFlags.Instance |
+        System.Reflection.BindingFlags.Public |
+        System.Reflection.BindingFlags.NonPublic;
+
+    private static readonly System.Reflection.PropertyInfo? CompletedProperty = typeof(Level).GetProperty("Completed", Flags);
+    private static readonly System.Reflection.FieldInfo? CompletedField = typeof(Level).GetField("Completed", Flags);
+
+    public static bool IsChapterComplete(Level level) {
+        try {
+            if (CompletedProperty?.PropertyType == typeof(bool)) {
+                return (bool) CompletedProperty.GetValue(level)!;
+            }
+
+            if (CompletedField?.FieldType == typeof(bool)) {
+                return (bool) CompletedField.GetValue(level)!;
+            }
+        } catch {
+            // best effort only
+        }
+
+        return false;
+    }
+}

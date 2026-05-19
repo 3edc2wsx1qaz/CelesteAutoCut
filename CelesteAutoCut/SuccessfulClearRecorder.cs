@@ -18,7 +18,10 @@ internal sealed class SuccessfulClearRecorder {
     private readonly HashSet<string> savedSegmentKeys = [];
 
     private bool active;
+    private bool chapterCompleteHandled;
     private string currentCheckpoint = "";
+    private string? lastObservedRoom;
+    private Session? observedSession;
     private string? areaSid;
     private string? areaMode;
     private string? chapterName;
@@ -40,6 +43,9 @@ internal sealed class SuccessfulClearRecorder {
         chapterName = AreaData.Get(session.Area)?.Name;
         currentCheckpoint = CheckpointName(session.Level);
         startCheckpoint = currentCheckpoint;
+        observedSession = session;
+        lastObservedRoom = session.Level ?? string.Empty;
+        chapterCompleteHandled = false;
         active = true;
 
         Log($"Successful-clear recording started at checkpoint '{currentCheckpoint}'.");
@@ -68,22 +74,40 @@ internal sealed class SuccessfulClearRecorder {
         Log("Discarded failed checkpoint attempt.");
     }
 
-    public void OnTransitionTo(LevelData nextLevelData) {
-        if (!active || nextLevelData == null || !nextLevelData.HasCheckpoint) {
+    public void ObserveLevel(Level level, bool chapterComplete) {
+        if (!CelesteAutoCutModule.Settings.AutoExportSuccessfulClearRecords) {
             return;
         }
 
-        CompleteCurrentSegment(CheckpointName(nextLevelData.Name));
+        if (!active && chapterCompleteHandled && ReferenceEquals(observedSession, level.Session)) {
+            return;
+        }
+
+        if (!active || !ReferenceEquals(observedSession, level.Session)) {
+            Start(level.Session);
+        }
+
+        string observedRoom = level.Session.Level ?? string.Empty;
+        if (!string.Equals(lastObservedRoom, observedRoom, StringComparison.Ordinal)) {
+            if (level.Session.LevelData?.HasCheckpoint == true) {
+                CompleteCurrentSegment(CheckpointName(observedRoom));
+            }
+
+            lastObservedRoom = observedRoom;
+        }
+
+        if (chapterComplete && !chapterCompleteHandled) {
+            string finalCheckpoint = CheckpointName($"{level.Session.Level}:complete");
+            CompleteCurrentSegment(finalCheckpoint);
+            Export(finalCheckpoint);
+            Stop(discard: true);
+            observedSession = level.Session;
+            lastObservedRoom = observedRoom;
+            chapterCompleteHandled = true;
+        }
     }
 
-    public void OnChapterComplete(Level level) {
-        if (!active) {
-            return;
-        }
-
-        string finalCheckpoint = CheckpointName($"{level.Session.Level}:complete");
-        CompleteCurrentSegment(finalCheckpoint);
-        Export(finalCheckpoint);
+    public void ObserveExitedLevel() {
         Stop(discard: true);
     }
 
@@ -101,6 +125,9 @@ internal sealed class SuccessfulClearRecorder {
         successfulSegments.Clear();
         savedSegmentKeys.Clear();
         currentCheckpoint = "";
+        chapterCompleteHandled = false;
+        lastObservedRoom = null;
+        observedSession = null;
         areaSid = null;
         areaMode = null;
         chapterName = null;

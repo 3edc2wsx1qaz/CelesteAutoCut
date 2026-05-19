@@ -280,3 +280,12 @@ CelesteReplay.zip
 CelesteReplay/artifacts/release/CelesteReplay.zip
 ```
 
+---
+
+## 2026-05-19 最新实现说明
+
+- 游戏侧运行时现在只保留 `Player.OnDie` 事件监听。
+- 原先依赖 `Level.OnEnter / OnLoadLevel / OnTransitionTo / OnComplete / OnExit` 的逻辑，改为在运行时根据当前 `Level / Session / Room` 状态变化推断。
+- 同时保留了前一轮的性能优化：
+  - `room_clip_session.json` 改为节流写盘；
+  - 输入采集去掉每帧 `LINQ / HashSet` 临时分配。

@@ -1,10 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Celeste;
 using Celeste.Mod;
-using Microsoft.Xna.Framework;
 using Monocle;
 
 namespace Celeste.Mod.CelesteAutoCut;
@@ -24,9 +23,14 @@ internal sealed class RoomClipRecorder {
 
     private bool active;
     private bool statusDirty;
+    private bool pendingInitialLoadLevel;
+    private bool pendingRespawnLoadLevel;
+    private bool chapterCompleteLogged;
     private string sessionId = string.Empty;
     private string attemptId = string.Empty;
     private string currentRoom = string.Empty;
+    private string? lastObservedRoom;
+    private Session? observedSession;
     private string? mapSid;
     private string? areaMode;
     private string? chapter;
@@ -57,20 +61,27 @@ internal sealed class RoomClipRecorder {
         sessionId = Guid.NewGuid().ToString("N");
         attemptId = Guid.NewGuid().ToString("N");
         gameFrame = 0;
+        observedSession = session;
         mapSid = session.Area.SID;
         areaMode = session.Area.Mode.ToString();
         chapter = AreaData.Get(session.Area)?.Name;
         currentRoom = session.Level ?? string.Empty;
+        lastObservedRoom = currentRoom;
+        pendingInitialLoadLevel = true;
+        pendingRespawnLoadLevel = false;
+        chapterCompleteLogged = false;
         statusDirty = true;
         lastStatusWriteFrame = long.MinValue;
 
         WriteEvent(RoomClipEventTypes.SessionStart, currentRoom, notes: new Dictionary<string, string?> {
             ["fromSaveData"] = fromSaveData.ToString(),
-            ["sessionLevel"] = session.Level
+            ["sessionLevel"] = session.Level,
+            ["source"] = "observed_state"
         });
         if (!string.IsNullOrWhiteSpace(currentRoom)) {
             WriteEvent(RoomClipEventTypes.RoomEnter, currentRoom, notes: new Dictionary<string, string?> {
-                ["reason"] = "session_start"
+                ["reason"] = "session_start",
+                ["source"] = "observed_state"
             });
         }
     }
@@ -82,42 +93,62 @@ internal sealed class RoomClipRecorder {
         }
     }
 
-    public void OnLoadLevel(Level level, Player.IntroTypes playerIntro, bool isFromLoader) {
-        if (!active || !CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
+    public void ObserveLevel(Level level, bool chapterComplete) {
+        if (!CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
             return;
         }
 
-        string room = level.Session.Level ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(currentRoom)) {
-            currentRoom = room;
-            WriteEvent(RoomClipEventTypes.RoomEnter, currentRoom, notes: new Dictionary<string, string?> {
-                ["reason"] = "late_initialize"
-            });
+        Session session = level.Session;
+        string observedRoom = session.Level ?? string.Empty;
+        if (!active || !ReferenceEquals(observedSession, session)) {
+            Start(session, fromSaveData: false);
+            observedRoom = session.Level ?? string.Empty;
         }
 
-        WriteEvent(RoomClipEventTypes.LoadLevel, room, notes: new Dictionary<string, string?> {
-            ["playerIntro"] = playerIntro.ToString(),
-            ["isFromLoader"] = isFromLoader.ToString()
-        });
+        if (!string.Equals(lastObservedRoom, observedRoom, StringComparison.Ordinal)) {
+            string fromRoom = currentRoomOr(lastObservedRoom);
+            WriteEvent(RoomClipEventTypes.Transition, fromRoom, observedRoom, new Dictionary<string, string?> {
+                ["source"] = "observed_state"
+            });
+
+            currentRoom = observedRoom;
+            lastObservedRoom = observedRoom;
+            attemptId = Guid.NewGuid().ToString("N");
+            pendingRespawnLoadLevel = false;
+            chapterCompleteLogged = false;
+
+            WriteEvent(RoomClipEventTypes.RoomEnter, currentRoom, notes: new Dictionary<string, string?> {
+                ["reason"] = "transition",
+                ["source"] = "observed_state"
+            });
+            WriteLoadLevel(observedRoom, playerIntro: "Transition");
+        } else if (pendingInitialLoadLevel) {
+            WriteLoadLevel(observedRoom, playerIntro: "Transition");
+        } else if (pendingRespawnLoadLevel) {
+            WriteLoadLevel(observedRoom, playerIntro: "Respawn");
+        }
+
+        if (chapterComplete && !chapterCompleteLogged) {
+            WriteEvent(RoomClipEventTypes.LevelComplete, currentRoomOr(observedRoom), notes: new Dictionary<string, string?> {
+                ["reason"] = "chapter_complete",
+                ["source"] = "observed_state"
+            });
+            chapterCompleteLogged = true;
+        }
     }
 
-    public void OnTransitionTo(Level level, LevelData? nextLevelData, Vector2 direction) {
-        if (!active || !CelesteAutoCutModule.Settings.EnableRoomClipRecorder || nextLevelData == null) {
+    public void ObserveExitedLevel(string reason) {
+        if (!active) {
+            ResetObservedState();
             return;
         }
 
-        string fromRoom = currentRoomOr(level.Session.Level);
-        string nextRoom = nextLevelData.Name ?? string.Empty;
-        WriteEvent(RoomClipEventTypes.Transition, fromRoom, nextRoom, new Dictionary<string, string?> {
-            ["directionX"] = direction.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["directionY"] = direction.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        WriteEvent(RoomClipEventTypes.Exit, currentRoom, notes: new Dictionary<string, string?> {
+            ["mode"] = reason,
+            ["source"] = "observed_state"
         });
-
-        currentRoom = nextRoom;
-        attemptId = Guid.NewGuid().ToString("N");
-        WriteEvent(RoomClipEventTypes.RoomEnter, currentRoom, notes: new Dictionary<string, string?> {
-            ["reason"] = "transition"
-        });
+        Stop(reason, discard: false);
+        ResetObservedState();
     }
 
     public void OnDeath(Player player) {
@@ -130,30 +161,8 @@ internal sealed class RoomClipRecorder {
             ["y"] = player.Position.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
         });
         attemptId = Guid.NewGuid().ToString("N");
+        pendingRespawnLoadLevel = true;
     }
-
-    public void OnComplete(Level level) {
-        if (!active || !CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
-            return;
-        }
-
-        WriteEvent(RoomClipEventTypes.LevelComplete, currentRoomOr(level.Session.Level), notes: new Dictionary<string, string?> {
-            ["reason"] = "chapter_complete"
-        });
-    }
-
-    public void OnExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session) {
-        if (!active) {
-            return;
-        }
-
-        WriteEvent(RoomClipEventTypes.Exit, currentRoomOr(session.Level), notes: new Dictionary<string, string?> {
-            ["mode"] = mode.ToString(),
-            ["exitType"] = exit?.GetType().Name
-        });
-        Stop(mode.ToString(), discard: false);
-    }
-
 
     public void Shutdown() {
         if (!active) {
@@ -161,6 +170,7 @@ internal sealed class RoomClipRecorder {
         }
 
         Stop("unload", discard: false);
+        ResetObservedState();
     }
 
     public void ResetLogs() {
@@ -181,6 +191,7 @@ internal sealed class RoomClipRecorder {
         gameFrame = 0;
         statusDirty = false;
         lastStatusWriteFrame = long.MinValue;
+        ResetObservedState();
         Log($"Room clip logs reset: {EventLogPath}");
     }
 
@@ -211,6 +222,16 @@ internal sealed class RoomClipRecorder {
         active = false;
         statusDirty = true;
         WriteStatus(force: true);
+    }
+
+    private void WriteLoadLevel(string room, string playerIntro) {
+        pendingInitialLoadLevel = false;
+        pendingRespawnLoadLevel = false;
+        WriteEvent(RoomClipEventTypes.LoadLevel, room, notes: new Dictionary<string, string?> {
+            ["playerIntro"] = playerIntro,
+            ["isFromLoader"] = "False",
+            ["source"] = "observed_state"
+        });
     }
 
     private void WriteEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null) {
@@ -252,6 +273,14 @@ internal sealed class RoomClipRecorder {
         lastStatusWriteFrame = gameFrame;
     }
 
+    private void ResetObservedState() {
+        observedSession = null;
+        lastObservedRoom = null;
+        pendingInitialLoadLevel = false;
+        pendingRespawnLoadLevel = false;
+        chapterCompleteLogged = false;
+    }
+
     private long? TryGetChapterTimeMs() {
         try {
             if (Engine.Scene is Level level) {
@@ -285,4 +314,3 @@ internal sealed class RoomClipRecorder {
         Engine.Commands?.Log($"[{Tag}] {message}");
     }
 }
-
