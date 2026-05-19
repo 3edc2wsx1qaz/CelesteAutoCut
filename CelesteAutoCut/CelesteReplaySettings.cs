@@ -42,6 +42,9 @@ public class CelesteAutoCutSettings : EverestModuleSettings {
     [SettingSubText("Optional absolute ffmpeg.exe path. Leave empty to auto-find or auto-download.")]
     public string ObsAutoAssemblerFfmpegPath { get; set; } = "";
 
+    [SettingSubText("Skips legacy per-frame successful-clear exports to reduce CPU and memory use. Leave on for OBS auto-cut.")]
+    public bool LowResourceMode { get; set; } = true;
+
     [SettingSubText("Records full per-frame inputs for successful checkpoint segments. Disabled by default to keep CPU/memory low.")]
     public bool AutoExportSuccessfulClearRecords { get; set; } = false;
 

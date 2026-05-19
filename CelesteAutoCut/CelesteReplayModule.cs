@@ -32,11 +32,13 @@ public sealed class CelesteAutoCutModule : EverestModule {
     public override void Load() {
         obsAutoAssemblerStartPending = true;
         On.Monocle.MInput.Update += OnMInputUpdate;
+        On.Celeste.Level.Update += OnLevelUpdate;
         Everest.Events.Player.OnDie += OnPlayerDie;
     }
 
     public override void Unload() {
         On.Monocle.MInput.Update -= OnMInputUpdate;
+        On.Celeste.Level.Update -= OnLevelUpdate;
         Everest.Events.Player.OnDie -= OnPlayerDie;
         controller.Stop();
         successfulClearRecorder.Stop(discard: true);
@@ -79,25 +81,30 @@ public sealed class CelesteAutoCutModule : EverestModule {
         }
 
         successfulClearRecorder.RecordFrame();
-        ObserveGameState();
-        roomClipRecorder.TickFrame();
+        ObserveSceneExit();
     }
 
-    private void ObserveGameState() {
-        if (Engine.Scene is Level level) {
-            bool chapterComplete = RuntimeLevelState.IsChapterComplete(level);
-            roomClipRecorder.ObserveLevel(level, chapterComplete);
-            successfulClearRecorder.ObserveLevel(level, chapterComplete);
+    private void OnLevelUpdate(On.Celeste.Level.orig_Update orig, Level self) {
+        orig(self);
 
-            if (Settings.AutoRecordOnLevelStart && controller.Mode == ReplayMode.Idle && !observedLevelSceneLastFrame) {
-                controller.StartRecording();
-            }
-
-            observedLevelSceneLastFrame = true;
+        if (!Settings.Enabled) {
             return;
         }
 
-        if (observedLevelSceneLastFrame) {
+        bool chapterComplete = RuntimeLevelState.IsChapterComplete(self);
+        roomClipRecorder.ObserveLevel(self, chapterComplete);
+        successfulClearRecorder.ObserveLevel(self, chapterComplete);
+
+        if (Settings.AutoRecordOnLevelStart && controller.Mode == ReplayMode.Idle && !observedLevelSceneLastFrame) {
+            controller.StartRecording();
+        }
+
+        observedLevelSceneLastFrame = true;
+        roomClipRecorder.TickFrame();
+    }
+
+    private void ObserveSceneExit() {
+        if (observedLevelSceneLastFrame && Engine.Scene is not Level) {
             roomClipRecorder.ObserveExitedLevel("scene_changed");
             successfulClearRecorder.ObserveExitedLevel();
             observedLevelSceneLastFrame = false;

@@ -34,7 +34,7 @@ internal sealed class SuccessfulClearRecorder {
     public void Start(Session session) {
         Stop(discard: true);
 
-        if (!CelesteAutoCutModule.Settings.AutoExportSuccessfulClearRecords) {
+        if (CelesteAutoCutModule.Settings.LowResourceMode || !CelesteAutoCutModule.Settings.AutoExportSuccessfulClearRecords) {
             return;
         }
 
@@ -73,7 +73,7 @@ internal sealed class SuccessfulClearRecorder {
     }
 
     public void ObserveLevel(Level level, bool chapterComplete) {
-        if (!CelesteAutoCutModule.Settings.AutoExportSuccessfulClearRecords) {
+        if (CelesteAutoCutModule.Settings.LowResourceMode || !CelesteAutoCutModule.Settings.AutoExportSuccessfulClearRecords) {
             return;
         }
 

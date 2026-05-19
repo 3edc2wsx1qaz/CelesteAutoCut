@@ -8,7 +8,7 @@ CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** �
 2. 在 OBS 中开始录制（推荐 `.mkv`）。
 3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
 
-当前版本重点修复：房间切换处不再重复保留同一段转场画面；最终成片默认直接放在 OBS 录制目录；成功通关输入记录默认关闭以降低 CPU/内存占用。
+当前版本重点修复：房间切换处不再重复保留同一段转场画面；最终成片默认直接放在 OBS 录制目录；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
 
 ---
 
@@ -95,11 +95,12 @@ helper 工作目录：
 
 - `EnableRoomClipRecorder = true`：保留房间事件，用于 OBS 自动剪辑。
 - `EnableObsAutoAssembler = true`：启动内置 OBS helper。
-- `AutoExportSuccessfulClearRecords = false`：默认关闭逐帧输入记录，避免长时间游玩时占用更多内存。
+- `LowResourceMode = true`：默认跳过旧的成功通关逐帧输入导出，降低 CPU/内存占用；不影响 OBS 自动剪辑。
+- `AutoExportSuccessfulClearRecords = false`：默认关闭逐帧输入记录；在低资源模式开启时，即使旧配置保留为 `true` 也不会采集逐帧输入。
 - OBS helper 默认轮询间隔提高到 `1000ms`，减少后台 CPU 占用。
 - 正常运行的 Info 级日志不再刷 Celeste 控制台；只保留警告、错误和手动命令输出。
 
-说明：`AutoExportSuccessfulClearRecords` 只影响额外导出的逐帧输入 JSON，不影响最终视频自动剪辑。
+说明：`LowResourceMode` / `AutoExportSuccessfulClearRecords` 只影响额外导出的逐帧输入 JSON，不影响最终视频自动剪辑。
 
 ---
 
@@ -148,7 +149,7 @@ D:\Steam\steamapps\common\Celeste\Mods
 
 ### 3. 控制台出现大量失败尝试日志
 
-当前版本已移除 `Discarded failed checkpoint attempt` 这类正常失败尝试日志，并默认关闭对应的逐帧输入记录功能。
+当前版本已移除 `Discarded failed checkpoint attempt` 这类正常失败尝试日志，并通过默认开启的 `LowResourceMode` 跳过对应的逐帧输入记录功能。
 
 ---
 
@@ -191,3 +192,5 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 ```powershell
 .\Scripts\real-zip-only-test.ps1
 ```
+
+脚本会先进入 1A 建立房间事件 session，再启动 OBS 录制并播放 1A TAS；如果 1A TAS 复用了进入录制前已经存在的同一房间 session，验证会复用该 session，而不是误判为“录制后没有新的 room event”。

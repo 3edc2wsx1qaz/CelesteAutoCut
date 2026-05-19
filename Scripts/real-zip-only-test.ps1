@@ -271,6 +271,16 @@ function Play-Tas([string]$DebugRcBaseUrl, [string]$TasPath) {
     }
 }
 
+function Invoke-DebugConsoleCommand([string]$DebugRcBaseUrl, [string]$Command) {
+    $escaped = [uri]::EscapeDataString($Command)
+    $response = & curl.exe -sS --max-time 20 "$DebugRcBaseUrl/console?command=$escaped" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to execute DebugRC console command: $Command"
+    }
+
+    return $response
+}
+
 function Get-TasStatus([string]$DebugRcBaseUrl) {
     $content = Invoke-DebugRcText -Url "$DebugRcBaseUrl/tas/info" -TimeoutSec 10
 
@@ -888,12 +898,9 @@ try {
     $preSessionId = $snapshot.status.currentSessionId
 
     Write-Step 'Bootstrap into a level'
-    @"
-console load 1
- 240
-"@ | Set-Content -LiteralPath $bootstrapTasPath -Encoding UTF8
-    Play-Tas -DebugRcBaseUrl $debugRcBaseUrl -TasPath $bootstrapTasPath
-    Wait-TasCompletion -DebugRcBaseUrl $debugRcBaseUrl -TimeoutSec 240 | Out-Null
+    $bootstrapStartUtc = (Get-Date).ToUniversalTime()
+    Invoke-DebugConsoleCommand -DebugRcBaseUrl $debugRcBaseUrl -Command 'load 1' | Out-Null
+    $bootstrapRoomSession = Wait-RoomEventSessionStart -Path $roomEventsPath -AfterUtc $bootstrapStartUtc -TimeoutSec 120
 
     Write-Step 'Start recording through helper API'
     $recordStartRequestedUtc = (Get-Date).ToUniversalTime()
@@ -924,7 +931,13 @@ console load 1
     Play-Tas -DebugRcBaseUrl $debugRcBaseUrl -TasPath $tasPath
     $tasStarted = Wait-TasStarted -DebugRcBaseUrl $debugRcBaseUrl -MinimumTotalFrames 1000 -TimeoutSec 60
     Write-Host "Detected 1A TAS start: frame $((Get-PropValue $tasStarted @('CurrentFrame', 'currentFrame')))/$((Get-PropValue $tasStarted @('TotalFrames', 'totalFrames'))), state=$((Get-PropValue $tasStarted @('State', 'state')))" -ForegroundColor Yellow
-    $tasRoomSession = Wait-RoomEventSessionStart -Path $roomEventsPath -AfterUtc $mainTasStartUtc -TimeoutSec 120
+    $tasRoomSession = $null
+    try {
+        $tasRoomSession = Wait-RoomEventSessionStart -Path $roomEventsPath -AfterUtc $mainTasStartUtc -TimeoutSec 5
+    } catch {
+        $tasRoomSession = $bootstrapRoomSession
+        Write-Host "Reusing bootstrap room event session for 1A TAS: $($tasRoomSession.SessionId)" -ForegroundColor Yellow
+    }
     if ($tasRoomSession.SessionId) {
         Write-Host "Detected room event session: $($tasRoomSession.SessionId)" -ForegroundColor Yellow
     }
@@ -1058,18 +1071,23 @@ console load 1
     $finalSummary | ConvertTo-Json -Depth 8
 }
 finally {
-    if ($originalBlacklist -ne $null) {
+    if (-not $KeepGameOpen -and $startedGame) {
+        Stop-Process -Id $startedGame.Id -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+
+    if ($originalBlacklist -ne $null -and $RestoreModsOnExit) {
         [System.IO.File]::WriteAllText($blacklistPath, $originalBlacklist, [System.Text.UTF8Encoding]::new($false))
     }
 
-    if ($restoreFolderBackup -and (Test-Path $restoreFolderBackup)) {
+    if ($RestoreModsOnExit -and $restoreFolderBackup -and (Test-Path $restoreFolderBackup)) {
         if (Test-Path $modFolderInstallPath) {
             Remove-Item -LiteralPath $modFolderInstallPath -Recurse -Force -ErrorAction SilentlyContinue
         }
         Move-Item -LiteralPath $restoreFolderBackup -Destination $modFolderInstallPath
     }
 
-    if ($restoreZipBackup -and (Test-Path $restoreZipBackup)) {
+    if ($RestoreModsOnExit -and $restoreZipBackup -and (Test-Path $restoreZipBackup)) {
         Copy-Item -LiteralPath $restoreZipBackup -Destination $modZipInstallPath -Force
     }
     elseif ((-not $hadModZipBefore) -and (($hadModFolderBefore) -or $RestoreModsOnExit) -and (Test-Path $modZipInstallPath)) {
@@ -1078,10 +1096,6 @@ finally {
 
     if ((Test-Path $blacklistBackupPath) -and $RestoreModsOnExit) {
         Remove-Item -LiteralPath $blacklistBackupPath -Force -ErrorAction SilentlyContinue
-    }
-
-    if (-not $KeepGameOpen -and $startedGame) {
-        Stop-Process -Id $startedGame.Id -Force -ErrorAction SilentlyContinue
     }
 
     if (-not $KeepObsOpen -and $startedObs) {
