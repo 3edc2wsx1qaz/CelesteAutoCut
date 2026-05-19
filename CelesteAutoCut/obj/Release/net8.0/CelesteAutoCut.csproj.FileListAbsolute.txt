@@ -1,0 +1,12 @@
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\bin\Release\net8.0\CelesteAutoCut.deps.json
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\bin\Release\net8.0\CelesteAutoCut.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\bin\Release\net8.0\CelesteAutoCut.pdb
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.csproj.AssemblyReference.cache
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.AssemblyInfoInputs.cache
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.AssemblyInfo.cs
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.csproj.CoreCompileInputs.cache
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\refint\CelesteAutoCut.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.pdb
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\ref\CelesteAutoCut.dll

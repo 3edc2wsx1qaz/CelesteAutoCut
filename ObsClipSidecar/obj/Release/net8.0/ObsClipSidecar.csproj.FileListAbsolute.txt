@@ -1,0 +1,14 @@
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\bin\Release\net8.0\ObsClipSidecar.exe
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\bin\Release\net8.0\ObsClipSidecar.deps.json
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\bin\Release\net8.0\ObsClipSidecar.runtimeconfig.json
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\bin\Release\net8.0\ObsClipSidecar.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\bin\Release\net8.0\ObsClipSidecar.pdb
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ObsClipSidecar.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ObsClipSidecar.AssemblyInfoInputs.cache
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ObsClipSidecar.AssemblyInfo.cs
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ObsClipSidecar.csproj.CoreCompileInputs.cache
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ObsClipSidecar.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\refint\ObsClipSidecar.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ObsClipSidecar.pdb
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ObsClipSidecar.genruntimeconfig.cache
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\ref\ObsClipSidecar.dll

@@ -1,0 +1,33 @@
+{
+  "Files": [
+    {
+      "Id": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipPanel\\wwwroot\\app.js",
+      "PackagePath": "staticwebassets\\app.js"
+    },
+    {
+      "Id": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipPanel\\wwwroot\\index.html",
+      "PackagePath": "staticwebassets\\index.html"
+    },
+    {
+      "Id": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipPanel\\wwwroot\\styles.css",
+      "PackagePath": "staticwebassets\\styles.css"
+    },
+    {
+      "Id": "obj\\Release\\net8.0\\win-x64\\staticwebassets\\msbuild.ObsClipPanel.Microsoft.AspNetCore.StaticWebAssets.props",
+      "PackagePath": "build\\Microsoft.AspNetCore.StaticWebAssets.props"
+    },
+    {
+      "Id": "obj\\Release\\net8.0\\win-x64\\staticwebassets\\msbuild.build.ObsClipPanel.props",
+      "PackagePath": "build\\ObsClipPanel.props"
+    },
+    {
+      "Id": "obj\\Release\\net8.0\\win-x64\\staticwebassets\\msbuild.buildMultiTargeting.ObsClipPanel.props",
+      "PackagePath": "buildMultiTargeting\\ObsClipPanel.props"
+    },
+    {
+      "Id": "obj\\Release\\net8.0\\win-x64\\staticwebassets\\msbuild.buildTransitive.ObsClipPanel.props",
+      "PackagePath": "buildTransitive\\ObsClipPanel.props"
+    }
+  ],
+  "ElementsToRemove": []
+}

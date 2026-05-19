@@ -1,0 +1,3 @@
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\artifacts\publish\CelesteAutoCut.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\artifacts\publish\CelesteAutoCut.pdb
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\artifacts\publish\CelesteAutoCut.deps.json

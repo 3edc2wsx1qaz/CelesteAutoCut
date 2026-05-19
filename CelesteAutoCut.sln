@@ -1,0 +1,42 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.3.32825.248
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CelesteAutoCut", "CelesteAutoCut\CelesteAutoCut.csproj", "{78C5F138-A7C9-49C7-BEDB-9024F70E1DD5}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{5D3D6E85-21C8-4F2B-9B03-4AA3F6C5D742}"
+	ProjectSection(SolutionItems) = preProject
+		everest.yaml = everest.yaml
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ObsClipSidecar", "ObsClipSidecar\ObsClipSidecar.csproj", "{5830D673-AF5A-4C99-AE3D-AC9C3563C77E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ObsClipPanel", "ObsClipPanel\ObsClipPanel.csproj", "{18780DC8-4F9F-4870-8D98-AE4B6B04504D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{78C5F138-A7C9-49C7-BEDB-9024F70E1DD5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78C5F138-A7C9-49C7-BEDB-9024F70E1DD5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78C5F138-A7C9-49C7-BEDB-9024F70E1DD5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78C5F138-A7C9-49C7-BEDB-9024F70E1DD5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5830D673-AF5A-4C99-AE3D-AC9C3563C77E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5830D673-AF5A-4C99-AE3D-AC9C3563C77E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5830D673-AF5A-4C99-AE3D-AC9C3563C77E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5830D673-AF5A-4C99-AE3D-AC9C3563C77E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{18780DC8-4F9F-4870-8D98-AE4B6B04504D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{18780DC8-4F9F-4870-8D98-AE4B6B04504D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{18780DC8-4F9F-4870-8D98-AE4B6B04504D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{18780DC8-4F9F-4870-8D98-AE4B6B04504D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
+
+

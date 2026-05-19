@@ -1,0 +1,154 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>CelesteAutoCut</AssemblyName>
+    <RootNamespace>Celeste.Mod.CelesteAutoCut</RootNamespace>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+
+    <CelestePrefix Condition="'$(CelestePrefix)' == '' And Exists('..\..\CelesteTAS-EverestInterop\CelesteTAS-EverestInterop\lib-stripped\Celeste.dll')">..\..\CelesteTAS-EverestInterop\CelesteTAS-EverestInterop\lib-stripped</CelestePrefix>
+    <CelestePrefix Condition="'$(CelestePrefix)' == '' And Exists('..\..\..\Celeste.dll')">..\..\..</CelestePrefix>
+
+    <ModRootDir>$(MSBuildProjectDirectory)\..\</ModRootDir>
+    <ArtifactsDir>$(ModRootDir)artifacts\</ArtifactsDir>
+    <ModPackageStageDir>$(MSBuildProjectDirectory)\obj\mod-package\</ModPackageStageDir>
+    <ObsHelperPublishDir>$(MSBuildProjectDirectory)\obj\obs-helper-publish\</ObsHelperPublishDir>
+    <ObsHelperStageDir>$(MSBuildProjectDirectory)\obj\obs-helper-stage\</ObsHelperStageDir>
+    <ObsHelperPayloadZip>$(MSBuildProjectDirectory)\obj\obs-helper-payload.zip</ObsHelperPayloadZip>
+    <DotNetCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildSDKsPath)\..\..\..\dotnet.exe'))</DotNetCliPath>
+    <PublishDir Condition="'$(Configuration)' == 'Release' and '$(PublishDir)' == ''">$(ArtifactsDir)publish\</PublishDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="$(CelestePrefix)\Celeste.dll" Private="false" Publicize="true" />
+    <Reference Include="$(CelestePrefix)\FNA.dll" Private="false" Publicize="true" />
+    <Reference Include="$(CelestePrefix)\MMHOOK_Celeste.dll" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.1" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(ObsHelperPayloadZip)" LogicalName="CelesteAutoCut.ObsClipPanelPayload.zip" />
+  </ItemGroup>
+
+  <Target Name="GenerateObsHelperPayload" BeforeTargets="CoreCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+    <RemoveDir Directories="$(ObsHelperPublishDir);$(ObsHelperStageDir)" />
+    <Delete Files="$(ObsHelperPayloadZip)" ContinueOnError="true" />
+
+    <Exec Command="&quot;$(DotNetCliPath)&quot; publish &quot;..\ObsClipPanel\ObsClipPanel.csproj&quot; -c $(Configuration) -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o &quot;$(ObsHelperPublishDir)&quot;"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+
+    <MakeDir Directories="$(ObsHelperStageDir)wwwroot" />
+
+    <Copy SourceFiles="$(ObsHelperPublishDir)ObsClipPanel.exe"
+          DestinationFiles="$(ObsHelperStageDir)ObsClipPanel.exe" />
+
+    <ItemGroup>
+      <ObsHelperStaticFiles Include="$(ObsHelperPublishDir)wwwroot\**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(ObsHelperStaticFiles)"
+          DestinationFiles="@(ObsHelperStaticFiles->'$(ObsHelperStageDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+
+    <ItemGroup>
+      <ObsHelperPayloadFiles Include="$(ObsHelperStageDir)**\*.*" />
+    </ItemGroup>
+
+    <CreateModZip Files="@(ObsHelperPayloadFiles)" BasePath="$(ObsHelperStageDir)" OutputPath="$(ObsHelperPayloadZip)" />
+  </Target>
+
+  <Target Name="CopyAssemblies" AfterTargets="Build">
+    <RemoveDir Directories="$(ModRootDir)bin\ObsClipPanel;$(ModRootDir)tools" />
+    <MakeDir Directories="$(ModRootDir)bin" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="$(ModRootDir)bin" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).pdb" DestinationFolder="$(ModRootDir)bin" Condition="Exists('$(OutputPath)$(AssemblyName).pdb')" />
+  </Target>
+
+  <Target Name="PackagePublishedMod" AfterTargets="Publish" Condition="'$(Configuration)' == 'Release'">
+    <RemoveDir Directories="$(ModPackageStageDir)" />
+    <MakeDir Directories="$(ModPackageStageDir)bin;$(ArtifactsDir)release" />
+
+    <ItemGroup>
+      <PublishedFiles Include="$(PublishDir)**\*.*" />
+      <RootPackageFiles Include="$(ModRootDir)everest.yaml;$(ModRootDir)README.md" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(PublishedFiles)"
+          DestinationFiles="@(PublishedFiles->'$(ModPackageStageDir)bin\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(RootPackageFiles)"
+          DestinationFiles="@(RootPackageFiles->'$(ModPackageStageDir)%(Filename)%(Extension)')" />
+
+    <ItemGroup>
+      <FilesToPackage Include="$(ModPackageStageDir)**\*.*" />
+    </ItemGroup>
+
+    <CreateModZip Files="@(FilesToPackage)" BasePath="$(ModPackageStageDir)" OutputPath="$(ModRootDir)CelesteAutoCut.zip" />
+    <Copy SourceFiles="$(ModRootDir)CelesteAutoCut.zip"
+          DestinationFiles="$(ArtifactsDir)release\CelesteAutoCut.zip"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <UsingTask TaskName="CreateModZip"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <BasePath ParameterType="System.String" Required="true" />
+      <OutputPath ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.IO.Compression" />
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+        var basePath = Path.GetFullPath(Uri.UnescapeDataString(BasePath));
+        if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+            basePath += Path.DirectorySeparatorChar;
+
+        var outputPath = Path.GetFullPath(Uri.UnescapeDataString(OutputPath));
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        if (File.Exists(outputPath))
+            File.Delete(outputPath);
+
+        using (ZipArchive zip = ZipFile.Open(outputPath, ZipArchiveMode.Create))
+        {
+            foreach (var file in Files)
+            {
+                string filePath = file.GetMetadata("FullPath");
+                string entryName = GetRelativePath(basePath, filePath);
+                zip.CreateEntryFromFile(filePath, entryName);
+            }
+        }
+
+        string GetRelativePath(string fromPath, string toPath)
+        {
+            if (string.IsNullOrEmpty(fromPath)) throw new ArgumentNullException(nameof(fromPath));
+            if (string.IsNullOrEmpty(toPath)) throw new ArgumentNullException(nameof(toPath));
+
+            Uri fromUri = new Uri(fromPath);
+            Uri toUri = new Uri(toPath);
+
+            if (fromUri.Scheme != toUri.Scheme)
+                return toPath;
+
+            Uri relativeUri = fromUri.MakeRelativeUri(toUri);
+            string relativePath = Uri.UnescapeDataString(relativeUri.ToString());
+
+            if (toUri.Scheme.Equals("file", StringComparison.InvariantCultureIgnoreCase))
+                relativePath = relativePath.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return relativePath;
+        }
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+</Project>

@@ -1,0 +1,564 @@
+namespace ObsClipSidecar;
+
+public sealed class IntervalGenerator
+{
+    public ClipIntervalsDocument Generate(IReadOnlyList<RoomEvent> roomEvents, SessionManifest manifest, IntervalGenerationOptions? options = null)
+    {
+        options ??= new IntervalGenerationOptions();
+        var warnings = new List<string>();
+        if (!manifest.Capabilities.SupportsOutputDurationAnchors)
+        {
+            warnings.Add("output_duration_anchors_unsupported");
+        }
+
+        if (!manifest.Capabilities.SupportsRecordFileChanged && manifest.Recordings.Any(r => r.Files.Count > 1))
+        {
+            warnings.Add("split_file_unsupported");
+        }
+
+        var sortedEvents = roomEvents
+            .Select((e, i) => (Event: e, OriginalIndex: i))
+            .OrderBy(x => x.Event.Utc)
+            .ThenBy(x => x.Event.GameFrame ?? long.MaxValue)
+            .ThenBy(x => x.OriginalIndex)
+            .Select(x => x.Event)
+            .ToList();
+
+        var candidates = BuildSuccessfulAttemptCandidates(sortedEvents)
+            .Concat(BuildCheckpointIntroCandidates(sortedEvents))
+            .OrderBy(c => c.Start.Utc)
+            .ThenBy(c => c.End.Utc)
+            .ThenBy(c => c.Start.GameFrame ?? long.MaxValue)
+            .ThenBy(c => c.End.GameFrame ?? long.MaxValue)
+            .Select((c, index) => c with { Index = index })
+            .ToList();
+        var prepared = new List<PreparedClip>();
+        var valid = new List<ClipInterval>();
+        var invalid = new List<ClipInterval>();
+
+        foreach (var candidate in candidates)
+        {
+            var startEstimate = EstimateBoundary(candidate.Start.Utc, manifest, options.MaxAllowedAnchorGapMs);
+            var endEstimate = EstimateBoundary(candidate.End.Utc, manifest, options.MaxAllowedAnchorGapMs);
+            var baseReasons = new List<string>();
+
+            if (!startEstimate.IsValid)
+            {
+                baseReasons.AddRange(startEstimate.Reasons.Select(r => "start_" + r));
+            }
+
+            if (!endEstimate.IsValid)
+            {
+                baseReasons.AddRange(endEstimate.Reasons.Select(r => "end_" + r));
+            }
+
+            if (startEstimate.RecordingId != endEstimate.RecordingId)
+            {
+                baseReasons.Add("cross_recording_clip");
+            }
+
+            if (manifest.Recordings.FirstOrDefault(r => r.RecordingId == startEstimate.RecordingId) is not { } recording)
+            {
+                baseReasons.Add("missing_recording");
+                AddInvalid(candidate, startEstimate, endEstimate, baseReasons, invalid);
+                continue;
+            }
+
+            var preRollMs = candidate.IsCheckpointIntro ? 0 : options.PreRollMs;
+            var postRollMs = candidate.IsCheckpointIntro ? 0 : options.PostRollMs;
+            var startMs = Math.Max(0, startEstimate.EstimatedOutputDurationMs - preRollMs);
+            var endMs = endEstimate.EstimatedOutputDurationMs + postRollMs;
+            prepared.Add(new PreparedClip(candidate, startEstimate, endEstimate, recording, startMs, endMs, baseReasons));
+        }
+
+        TrimAdjacentRoomOverlaps(prepared);
+
+        foreach (var clip in prepared.OrderBy(c => c.Candidate.Index))
+        {
+            var reasons = new List<string>(clip.BlockingReasons);
+            if (clip.EndMs <= clip.StartMs)
+            {
+                reasons.Add("non_positive_clip_duration");
+                AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, reasons, invalid, clip.StartMs, clip.EndMs);
+                continue;
+            }
+
+            if (reasons.Count > 0)
+            {
+                AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, reasons, invalid, clip.StartMs, clip.EndMs);
+                continue;
+            }
+
+            var mediaRanges = ApplyPausePolicy(clip.StartMs, clip.EndMs, clip.Recording, options, out var pausePolicy, out var pauseReasons);
+            if (pauseReasons.Count > 0)
+            {
+                reasons.AddRange(pauseReasons);
+            }
+
+            if (mediaRanges.Count == 0 || reasons.Count > 0)
+            {
+                AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, reasons.Count == 0 ? ["empty_after_pause_split"] : reasons, invalid, clip.StartMs, clip.EndMs, pausePolicy);
+                continue;
+            }
+
+            var splitIndex = 0;
+            foreach (var (rangeStart, rangeEnd) in mediaRanges)
+            {
+                var mapping = MapToFiles(rangeStart, rangeEnd, clip.Recording, options.RequireExistingFiles, out var mapReasons);
+                if (mapReasons.Count > 0)
+                {
+                    AddInvalid(clip.Candidate, clip.StartEstimate, clip.EndEstimate, mapReasons, invalid, rangeStart, rangeEnd, pausePolicy);
+                    continue;
+                }
+
+                valid.Add(new ClipInterval
+                {
+                    ClipId = $"{clip.Candidate.RoomKey}_{clip.Candidate.Index:D4}_{splitIndex:D2}".Replace(' ', '_').Replace('/', '_').Replace('\\', '_'),
+                    Room = clip.Candidate.Room,
+                    MapSid = clip.Candidate.MapSid,
+                    RecordingId = clip.Recording.RecordingId,
+                    StartUtc = clip.Candidate.Start.Utc,
+                    EndUtc = clip.Candidate.End.Utc,
+                    StartOutputDurationMs = rangeStart,
+                    EndOutputDurationMs = rangeEnd,
+                    AlignmentMethod = "obs_output_duration_bracket",
+                    AnchorBefore = clip.StartEstimate.AnchorBefore,
+                    AnchorAfter = clip.EndEstimate.AnchorAfter,
+                    ErrorBoundMs = Math.Max(clip.StartEstimate.ErrorBoundMs, clip.EndEstimate.ErrorBoundMs),
+                    PausePolicy = pausePolicy,
+                    SourceFileMapping = mapping,
+                    Reasons = BuildValidReasons(splitIndex, clip)
+                });
+                splitIndex++;
+            }
+        }
+
+        return new ClipIntervalsDocument
+        {
+            Options = options,
+            Clips = valid,
+            InvalidClips = invalid,
+            Warnings = warnings
+        };
+    }
+
+    private static List<ClipCandidate> BuildSuccessfulAttemptCandidates(IReadOnlyList<RoomEvent> events)
+    {
+        var result = new List<ClipCandidate>();
+        RoomEvent? currentRoomStart = null;
+        RoomEvent? attemptStart = null;
+        var index = 0;
+
+        foreach (var e in events)
+        {
+            if (e.IsRoomStart)
+            {
+                currentRoomStart = e;
+                attemptStart = e;
+                continue;
+            }
+
+            if (e.EventType is "transition")
+            {
+                if (currentRoomStart is not null && attemptStart is not null)
+                {
+                    result.Add(new ClipCandidate(index++, attemptStart, e, currentRoomStart.Room ?? e.Room ?? "room", currentRoomStart.MapSid ?? e.MapSid, "final_successful_attempt", false));
+                }
+
+                currentRoomStart = e with { EventType = "room_start", Room = e.NextRoom ?? e.Room };
+                attemptStart = currentRoomStart;
+                continue;
+            }
+
+            if (e.EventType is "level_complete")
+            {
+                if (currentRoomStart is not null && attemptStart is not null)
+                {
+                    result.Add(new ClipCandidate(index++, attemptStart, e, currentRoomStart.Room ?? e.Room ?? "room", currentRoomStart.MapSid ?? e.MapSid, "final_successful_attempt", false));
+                }
+                currentRoomStart = null;
+                attemptStart = null;
+                continue;
+            }
+
+            if (e.EventType is "on_exit" or "exit")
+            {
+                if (currentRoomStart is not null && attemptStart is not null)
+                {
+                    // Explicit exit is not a successful room boundary, so emit no kept candidate.
+                    currentRoomStart = null;
+                    attemptStart = null;
+                }
+                continue;
+            }
+
+            if (e.EventType is "death" or "respawn" or "load_end" or "load_level")
+            {
+                attemptStart = e;
+            }
+        }
+
+        return result;
+    }
+
+    private static List<ClipCandidate> BuildCheckpointIntroCandidates(IReadOnlyList<RoomEvent> events)
+    {
+        var result = new List<ClipCandidate>();
+        RoomLifecycle? current = null;
+        var index = 0;
+        var nextRoomIsFirstRoom = true;
+
+        foreach (var e in events)
+        {
+            if (e.EventType is "room_enter")
+            {
+                current = new RoomLifecycle(e, nextRoomIsFirstRoom);
+                nextRoomIsFirstRoom = false;
+                continue;
+            }
+
+            if (current is null)
+            {
+                continue;
+            }
+
+            if (e.EventType is "load_level" && current.InitialCheckpoint is null && IsInitialCheckpointLoadLevel(current.Entry, e))
+            {
+                current.InitialCheckpoint = e;
+                continue;
+            }
+
+            if (e.EventType is "death" && SameRoom(current.Entry, e))
+            {
+                current.HadDeath = true;
+                continue;
+            }
+
+            if (e.EventType is "transition" or "level_complete")
+            {
+                if (current.InitialCheckpoint is not null &&
+                    SameRoom(current.Entry, e) &&
+                    (current.HadDeath || current.IsFirstRoom))
+                {
+                    var reason = current.IsFirstRoom
+                        ? "room_entry_intro_first_room"
+                        : "room_entry_intro_before_clear";
+                    result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, reason, true));
+                }
+
+                current = null;
+                if (e.EventType is "level_complete")
+                {
+                    nextRoomIsFirstRoom = true;
+                }
+                continue;
+            }
+
+            if (e.EventType is "on_exit" or "exit" or "session_end")
+            {
+                if (current.InitialCheckpoint is not null)
+                {
+                    result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_at_end", true));
+                }
+
+                current = null;
+                nextRoomIsFirstRoom = true;
+            }
+        }
+
+        return result;
+    }
+
+    private static void TrimAdjacentRoomOverlaps(List<PreparedClip> clips)
+    {
+        PreparedClip? previous = null;
+        foreach (var clip in clips
+                     .OrderBy(c => c.Recording.RecordingId, StringComparer.Ordinal)
+                     .ThenBy(c => c.StartMs)
+                     .ThenBy(c => c.EndMs)
+                     .ThenBy(c => c.Candidate.Index))
+        {
+            if (previous is not null &&
+                string.Equals(previous.Recording.RecordingId, clip.Recording.RecordingId, StringComparison.Ordinal) &&
+                clip.StartMs < previous.EndMs)
+            {
+                clip.StartMs = previous.EndMs;
+                clip.Annotations.Add("adjacent_room_overlap_trimmed");
+            }
+
+            previous = clip;
+        }
+    }
+
+    private static List<string> BuildValidReasons(int splitIndex, PreparedClip clip)
+    {
+        var reasons = new List<string> { clip.Candidate.BaseValidReason };
+        if (splitIndex > 0)
+        {
+            reasons.Add("pause_split_continuation");
+        }
+
+        foreach (var reason in clip.Annotations)
+        {
+            if (!reasons.Contains(reason, StringComparer.Ordinal))
+            {
+                reasons.Add(reason);
+            }
+        }
+
+        return reasons;
+    }
+
+    private static BoundaryEstimate EstimateBoundary(DateTimeOffset utc, SessionManifest manifest, long maxAllowedAnchorGapMs)
+    {
+        var reasons = new List<string>();
+        RecordingManifest? selectedRecording = null;
+        ObsAnchor? before = null;
+        ObsAnchor? after = null;
+
+        foreach (var recording in manifest.Recordings)
+        {
+            var anchors = recording.Anchors.OrderBy(a => a.Utc).ToList();
+            var b = anchors.LastOrDefault(a => a.Utc <= utc);
+            var a = anchors.FirstOrDefault(a => a.Utc >= utc);
+            if (b is not null && a is not null)
+            {
+                selectedRecording = recording;
+                before = b;
+                after = a;
+                break;
+            }
+        }
+
+        if (selectedRecording is null || before is null || after is null)
+        {
+            return new BoundaryEstimate { Utc = utc, IsValid = false, Reasons = ["missing_bracket_anchors"] };
+        }
+
+        var wallGapMs = (long)Math.Ceiling((after.Utc - before.Utc).Duration().TotalMilliseconds);
+        if (wallGapMs > maxAllowedAnchorGapMs)
+        {
+            reasons.Add("anchor_gap_exceeds_max");
+        }
+
+        var estimated = InterpolateDuration(utc, before, after);
+        if (before.OutputPaused || after.OutputPaused)
+        {
+            reasons.Add("boundary_bracket_touches_pause");
+        }
+
+        return new BoundaryEstimate
+        {
+            Utc = utc,
+            RecordingId = selectedRecording.RecordingId,
+            AnchorBefore = before,
+            AnchorAfter = after,
+            EstimatedOutputDurationMs = estimated,
+            ErrorBoundMs = wallGapMs,
+            IsValid = reasons.Count == 0,
+            Reasons = reasons
+        };
+    }
+
+    private static long InterpolateDuration(DateTimeOffset utc, ObsAnchor before, ObsAnchor after)
+    {
+        var wallSpan = (after.Utc - before.Utc).TotalMilliseconds;
+        if (wallSpan <= 0)
+        {
+            return before.OutputDurationMs;
+        }
+
+        var position = (utc - before.Utc).TotalMilliseconds / wallSpan;
+        return (long)Math.Round(before.OutputDurationMs + ((after.OutputDurationMs - before.OutputDurationMs) * position));
+    }
+
+    private static List<(long Start, long End)> ApplyPausePolicy(long startMs, long endMs, RecordingManifest recording, IntervalGenerationOptions options, out string pausePolicy, out List<string> reasons)
+    {
+        reasons = [];
+        var pauses = recording.Pauses.Where(p => p.EndDurationMs > startMs && p.StartDurationMs < endMs).OrderBy(p => p.StartDurationMs).ToList();
+        if (pauses.Count == 0)
+        {
+            pausePolicy = "no_pause_seen";
+            return [(startMs, endMs)];
+        }
+
+        if (!options.SplitOnPause)
+        {
+            pausePolicy = "invalidate_on_overlap";
+            reasons.Add("pause_overlap");
+            return [];
+        }
+
+        pausePolicy = "supported_interval_subtraction";
+        var ranges = new List<(long Start, long End)>();
+        var cursor = startMs;
+        foreach (var pause in pauses)
+        {
+            if (pause.EndDurationMs <= pause.StartDurationMs)
+            {
+                reasons.Add("invalid_pause_boundary");
+                continue;
+            }
+
+            if (pause.StartDurationMs > cursor)
+            {
+                ranges.Add((cursor, Math.Min(pause.StartDurationMs, endMs)));
+            }
+            cursor = Math.Max(cursor, pause.EndDurationMs);
+        }
+
+        if (cursor < endMs)
+        {
+            ranges.Add((cursor, endMs));
+        }
+
+        return ranges.Where(r => r.End > r.Start).ToList();
+    }
+
+    private static List<ClipFileSlice> MapToFiles(long startMs, long endMs, RecordingManifest recording, bool requireExistingFiles, out List<string> reasons)
+    {
+        reasons = [];
+        var slices = new List<ClipFileSlice>();
+        var files = recording.Files.OrderBy(f => f.StartDurationMs).ToList();
+        if (files.Count == 0)
+        {
+            reasons.Add("missing_recording_files");
+            return slices;
+        }
+
+        var cursor = startMs;
+        foreach (var file in files)
+        {
+            if (file.EndDurationMs <= cursor || file.StartDurationMs >= endMs)
+            {
+                continue;
+            }
+
+            if (requireExistingFiles && !File.Exists(file.Path))
+            {
+                reasons.Add("source_file_missing:" + file.Path);
+                return [];
+            }
+
+            var sliceStart = Math.Max(cursor, file.StartDurationMs);
+            var sliceEnd = Math.Min(endMs, file.EndDurationMs);
+            slices.Add(new ClipFileSlice
+            {
+                SourcePath = file.Path,
+                SourceStartDurationMs = sliceStart - file.StartDurationMs,
+                SourceEndDurationMs = sliceEnd - file.StartDurationMs
+            });
+            cursor = sliceEnd;
+            if (cursor >= endMs)
+            {
+                break;
+            }
+        }
+
+        if (cursor < endMs)
+        {
+            reasons.Add("source_file_mapping_gap");
+        }
+
+        return slices;
+    }
+
+    private static bool IsInitialCheckpointLoadLevel(RoomEvent entry, RoomEvent loadLevel)
+    {
+        if (!SameRoom(entry, loadLevel))
+        {
+            return false;
+        }
+
+        if (!string.Equals(loadLevel.EventType, "load_level", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.AttemptId) &&
+            string.Equals(entry.AttemptId, loadLevel.AttemptId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var playerIntro = GetNoteString(loadLevel, "playerIntro");
+        return !string.Equals(playerIntro, "Respawn", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool SameRoom(RoomEvent left, RoomEvent right)
+        => string.Equals(left.Room ?? string.Empty, right.Room ?? string.Empty, StringComparison.Ordinal);
+
+    private static string? GetNoteString(RoomEvent e, string key)
+    {
+        if (e.Notes is null || !e.Notes.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value.ToString();
+    }
+
+    private static void AddInvalid(ClipCandidate candidate, BoundaryEstimate start, BoundaryEstimate end, List<string> reasons, List<ClipInterval> invalid, long? startOverride = null, long? endOverride = null, string pausePolicy = "no_pause_seen")
+    {
+        invalid.Add(new ClipInterval
+        {
+            ClipId = $"invalid_{candidate.RoomKey}_{candidate.Index:D4}_{invalid.Count:D2}".Replace(' ', '_').Replace('/', '_').Replace('\\', '_'),
+            Room = candidate.Room,
+            MapSid = candidate.MapSid,
+            RecordingId = start.RecordingId,
+            StartUtc = candidate.Start.Utc,
+            EndUtc = candidate.End.Utc,
+            StartOutputDurationMs = startOverride ?? start.EstimatedOutputDurationMs,
+            EndOutputDurationMs = endOverride ?? end.EstimatedOutputDurationMs,
+            AnchorBefore = start.AnchorBefore,
+            AnchorAfter = end.AnchorAfter,
+            ErrorBoundMs = Math.Max(start.ErrorBoundMs, end.ErrorBoundMs),
+            PausePolicy = pausePolicy,
+            IsValid = false,
+            Status = "invalid",
+            Reasons = reasons.Distinct().ToList()
+        });
+    }
+
+    private sealed record ClipCandidate(int Index, RoomEvent Start, RoomEvent End, string Room, string? MapSid, string BaseValidReason, bool IsCheckpointIntro)
+    {
+        public string RoomKey => string.IsNullOrWhiteSpace(Room) ? "room" : Room;
+    }
+
+    private sealed class RoomLifecycle
+    {
+        public RoomLifecycle(RoomEvent entry, bool isFirstRoom)
+        {
+            Entry = entry;
+            IsFirstRoom = isFirstRoom;
+        }
+
+        public RoomEvent Entry { get; }
+        public bool IsFirstRoom { get; }
+        public RoomEvent? InitialCheckpoint { get; set; }
+        public bool HadDeath { get; set; }
+    }
+
+    private sealed class PreparedClip
+    {
+        public PreparedClip(ClipCandidate candidate, BoundaryEstimate startEstimate, BoundaryEstimate endEstimate, RecordingManifest recording, long startMs, long endMs, List<string> blockingReasons)
+        {
+            Candidate = candidate;
+            StartEstimate = startEstimate;
+            EndEstimate = endEstimate;
+            Recording = recording;
+            StartMs = startMs;
+            EndMs = endMs;
+            BlockingReasons = blockingReasons;
+        }
+
+        public ClipCandidate Candidate { get; }
+        public BoundaryEstimate StartEstimate { get; }
+        public BoundaryEstimate EndEstimate { get; }
+        public RecordingManifest Recording { get; }
+        public long StartMs { get; set; }
+        public long EndMs { get; set; }
+        public List<string> BlockingReasons { get; }
+        public List<string> Annotations { get; } = [];
+    }
+}
