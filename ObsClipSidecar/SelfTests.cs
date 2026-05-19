@@ -19,6 +19,10 @@ public static class SelfTests
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
             ("revisited branching room gets separate death entry clips", RevisitedBranchingRoomGetsSeparateDeathEntryClips),
+            ("death on revisit still keeps earliest uncovered room intro", DeathOnRevisitKeepsEarliestUncoveredRoomIntro),
+            ("strawberry room keeps collect-and-exit attempt after death", StrawberryRoomKeepsCollectedAttemptAfterDeath),
+            ("strawberry before death does not authorize later exit", StrawberryBeforeDeathDoesNotAuthorizeLaterExit),
+            ("strawberry room without death keeps entry through exit", StrawberryRoomWithoutDeathKeepsEntryThroughExit),
             ("accidental backtrack to cleared previous room is cut", AccidentalBacktrackToClearedPreviousRoomIsCut),
             ("branch return to hub room is kept", BranchReturnToHubRoomIsKept),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
@@ -298,6 +302,118 @@ public static class SelfTests
         Assert(roomBClips.Where(c => c.Reasons.Contains("final_successful_attempt")).All(c => c.StartUtc != start.AddMilliseconds(1_500) && c.StartUtc != start.AddMilliseconds(4_500)), "death timestamps must not become successful clip starts");
         Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_010), "first b visit entry-load boundaries mismatch");
         Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_010), "second b visit entry-load boundaries mismatch");
+    }
+
+    private static void DeathOnRevisitKeepsEarliestUncoveredRoomIntro()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var firstEnter = start.AddSeconds(1);
+        var firstLoad = start.AddMilliseconds(1_100);
+        var secondEnter = start.AddSeconds(3);
+        var secondLoad = start.AddMilliseconds(3_100);
+        var respawnLoad = start.AddSeconds(4);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "transition", Utc = firstEnter, Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = firstEnter, Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = firstLoad, Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "b", NextRoom = "a", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "a", MapSid = "map" },
+            new() { EventType = "transition", Utc = secondEnter, Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = secondEnter, Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = secondLoad, Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "death", Utc = start.AddMilliseconds(3_500), Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(5), Room = "b", NextRoom = "c", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var roomBIntros = doc.Clips.Where(c => c.Room == "b" && c.Reasons.Contains("room_entry_intro_before_clear")).OrderBy(c => c.StartUtc).ToList();
+        Assert(roomBIntros.Count == 2, "death room should keep earliest uncovered entry-load intro and the later death-visit intro");
+        Assert(roomBIntros[0].StartUtc == firstEnter && roomBIntros[0].EndUtc == firstLoad, "earliest room-b intro should not be lost after revisit death");
+        Assert(roomBIntros[1].StartUtc == secondEnter && roomBIntros[1].EndUtc == secondLoad, "death-visit room-b intro should remain separate");
+    }
+
+    private static void StrawberryRoomKeepsCollectedAttemptAfterDeath()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var respawnLoad = start.AddSeconds(1);
+        var collect = start.AddMilliseconds(1_500);
+        var clear = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "berry", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "death", Utc = start.AddMilliseconds(700), Room = "berry", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "strawberry_collect", Utc = collect, Room = "berry", MapSid = "map" },
+            new() { EventType = "transition", Utc = clear, Room = "berry", NextRoom = "next", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("final_successful_attempt"));
+        Assert(success.StartUtc == respawnLoad && success.EndUtc == clear, "strawberry success after death should start from respawn/load_level and include collect-to-exit");
+        Assert(doc.Clips.Any(c => c.Room == "berry" && c.Reasons.Contains("room_entry_intro_before_clear")), "death strawberry room should still keep entry-load intro");
+    }
+
+    private static void StrawberryBeforeDeathDoesNotAuthorizeLaterExit()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "berry", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "strawberry_collect", Utc = start.AddMilliseconds(500), Room = "berry", MapSid = "map" },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "berry", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "berry", NextRoom = "next", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        Assert(!doc.Clips.Any(c => c.Room == "berry" && c.Reasons.Contains("final_successful_attempt")), "strawberry collected before death must not make a later no-collect exit successful");
+        Assert(doc.Clips.Single(c => c.Room == "berry").Reasons.Contains("room_entry_intro_before_clear"), "only the death-room intro should remain");
+    }
+
+    private static void StrawberryRoomWithoutDeathKeepsEntryThroughExit()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var clear = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "berry", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "berry", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "strawberry_collect", Utc = start.AddSeconds(1), Room = "berry", MapSid = "map" },
+            new() { EventType = "transition", Utc = clear, Room = "berry", NextRoom = "next", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("final_successful_attempt"));
+        Assert(success.StartUtc == start && success.EndUtc == clear, "strawberry room without death should keep entry -> collect -> exit");
     }
 
     private static void AccidentalBacktrackToClearedPreviousRoomIsCut()

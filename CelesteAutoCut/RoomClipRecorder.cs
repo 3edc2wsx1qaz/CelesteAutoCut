@@ -162,6 +162,24 @@ internal sealed class RoomClipRecorder {
         pendingRespawnLoadLevel = true;
     }
 
+    public void OnStrawberryCollect(Strawberry strawberry) {
+        if (!active || !CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
+            return;
+        }
+
+        WriteEvent(RoomClipEventTypes.StrawberryCollect, currentRoomOr(strawberry.SceneAs<Level>()?.Session.Level), notes: new Dictionary<string, string?> {
+            ["entityId"] = strawberry.ID.Key,
+            ["level"] = strawberry.ID.Level,
+            ["id"] = strawberry.ID.ID.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["x"] = strawberry.Position.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["y"] = strawberry.Position.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["golden"] = strawberry.Golden.ToString(),
+            ["winged"] = strawberry.Winged.ToString(),
+            ["moon"] = strawberry.Moon.ToString(),
+            ["source"] = "strawberry_on_collect"
+        });
+    }
+
     public void Shutdown() {
         if (!active) {
             return;

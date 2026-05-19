@@ -25,8 +25,9 @@ public sealed class IntervalGenerator
             .ToList();
 
         var suppressedBacktrackTransitions = FindAccidentalBacktrackTransitions(sortedEvents);
-        var candidates = BuildSuccessfulAttemptCandidates(sortedEvents, suppressedBacktrackTransitions)
-            .Concat(BuildCheckpointIntroCandidates(sortedEvents, suppressedBacktrackTransitions))
+        var successfulAttemptCandidates = BuildSuccessfulAttemptCandidates(sortedEvents, suppressedBacktrackTransitions);
+        var candidates = successfulAttemptCandidates
+            .Concat(BuildCheckpointIntroCandidates(sortedEvents, suppressedBacktrackTransitions, successfulAttemptCandidates))
             .OrderBy(c => c.Start.Utc)
             .ThenBy(c => c.End.Utc)
             .ThenBy(c => c.Start.GameFrame ?? long.MaxValue)
@@ -160,6 +161,8 @@ public sealed class IntervalGenerator
         RoomEvent? currentRoomStart = null;
         RoomEvent? attemptStart = null;
         var attemptFailed = false;
+        var currentVisitSawStrawberry = false;
+        var attemptCollectedStrawberry = false;
         var index = 0;
 
         foreach (var e in events)
@@ -169,12 +172,17 @@ public sealed class IntervalGenerator
                 currentRoomStart = e;
                 attemptStart = e;
                 attemptFailed = false;
+                currentVisitSawStrawberry = false;
+                attemptCollectedStrawberry = false;
                 continue;
             }
 
             if (e.EventType is "transition")
             {
-                if (currentRoomStart is not null && attemptStart is not null && !suppressedTransitions.Contains(e))
+                if (currentRoomStart is not null &&
+                    attemptStart is not null &&
+                    !suppressedTransitions.Contains(e) &&
+                    (!currentVisitSawStrawberry || attemptCollectedStrawberry))
                 {
                     result.Add(new ClipCandidate(index++, attemptStart, e, currentRoomStart.Room ?? e.Room ?? "room", currentRoomStart.MapSid ?? e.MapSid, "final_successful_attempt", false));
                 }
@@ -182,17 +190,23 @@ public sealed class IntervalGenerator
                 currentRoomStart = e with { EventType = "room_start", Room = e.NextRoom ?? e.Room };
                 attemptStart = currentRoomStart;
                 attemptFailed = false;
+                currentVisitSawStrawberry = false;
+                attemptCollectedStrawberry = false;
                 continue;
             }
 
             if (e.EventType is "level_complete")
             {
-                if (currentRoomStart is not null && attemptStart is not null)
+                if (currentRoomStart is not null &&
+                    attemptStart is not null &&
+                    (!currentVisitSawStrawberry || attemptCollectedStrawberry))
                 {
                     result.Add(new ClipCandidate(index++, attemptStart, e, currentRoomStart.Room ?? e.Room ?? "room", currentRoomStart.MapSid ?? e.MapSid, "final_successful_attempt", false));
                 }
                 currentRoomStart = null;
                 attemptStart = null;
+                currentVisitSawStrawberry = false;
+                attemptCollectedStrawberry = false;
                 continue;
             }
 
@@ -204,6 +218,8 @@ public sealed class IntervalGenerator
                     currentRoomStart = null;
                     attemptStart = null;
                 }
+                currentVisitSawStrawberry = false;
+                attemptCollectedStrawberry = false;
                 continue;
             }
 
@@ -211,6 +227,7 @@ public sealed class IntervalGenerator
             {
                 attemptFailed = true;
                 attemptStart = null;
+                attemptCollectedStrawberry = false;
                 continue;
             }
 
@@ -218,6 +235,7 @@ public sealed class IntervalGenerator
             {
                 attemptFailed = true;
                 attemptStart = e;
+                attemptCollectedStrawberry = false;
                 continue;
             }
 
@@ -226,18 +244,31 @@ public sealed class IntervalGenerator
                 if (attemptFailed || IsRespawnLoadLevel(e))
                 {
                     attemptStart = e;
+                    attemptCollectedStrawberry = false;
                 }
 
                 attemptFailed = false;
+            }
+
+            if (IsStrawberryCollect(e) && currentRoomStart is not null && SameRoom(currentRoomStart, e))
+            {
+                currentVisitSawStrawberry = true;
+                attemptCollectedStrawberry = true;
             }
         }
 
         return result;
     }
 
-    private static List<ClipCandidate> BuildCheckpointIntroCandidates(IReadOnlyList<RoomEvent> events, IReadOnlySet<RoomEvent> suppressedTransitions)
+    private static List<ClipCandidate> BuildCheckpointIntroCandidates(
+        IReadOnlyList<RoomEvent> events,
+        IReadOnlySet<RoomEvent> suppressedTransitions,
+        IReadOnlyList<ClipCandidate> successfulAttemptCandidates)
     {
         var result = new List<ClipCandidate>();
+        var firstIntrosByRoom = new Dictionary<RoomIdentity, RoomIntro>();
+        var roomsWithDeaths = new HashSet<RoomIdentity>();
+        var emittedIntros = new HashSet<IntroIdentity>();
         RoomLifecycle? current = null;
         var index = 0;
 
@@ -257,12 +288,15 @@ public sealed class IntervalGenerator
             if (e.EventType is "load_level" && current.InitialCheckpoint is null && IsInitialCheckpointLoadLevel(current.Entry, e))
             {
                 current.InitialCheckpoint = e;
+                var identity = RoomIdentity.From(current.Entry);
+                firstIntrosByRoom.TryAdd(identity, new RoomIntro(current.Entry, current.InitialCheckpoint));
                 continue;
             }
 
             if (e.EventType is "death" && SameRoom(current.Entry, e))
             {
                 current.HadDeath = true;
+                roomsWithDeaths.Add(RoomIdentity.From(current.Entry));
                 continue;
             }
 
@@ -273,7 +307,7 @@ public sealed class IntervalGenerator
                     current.HadDeath &&
                     !suppressedTransitions.Contains(e))
                 {
-                    result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_before_clear", true));
+                    AddIntroCandidate(result, emittedIntros, ref index, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_before_clear");
                 }
 
                 current = null;
@@ -284,11 +318,26 @@ public sealed class IntervalGenerator
             {
                 if (current.InitialCheckpoint is not null)
                 {
-                    result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_at_end", true));
+                    AddIntroCandidate(result, emittedIntros, ref index, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_at_end");
                 }
 
                 current = null;
             }
+        }
+
+        foreach (var room in roomsWithDeaths)
+        {
+            if (!firstIntrosByRoom.TryGetValue(room, out var intro))
+            {
+                continue;
+            }
+
+            if (SuccessfulAttemptAlreadyCoversIntro(successfulAttemptCandidates, intro))
+            {
+                continue;
+            }
+
+            AddIntroCandidate(result, emittedIntros, ref index, intro.Entry, intro.InitialCheckpoint, intro.Entry.Room ?? "room", intro.Entry.MapSid, "room_entry_intro_before_clear");
         }
 
         return result;
@@ -589,6 +638,33 @@ public sealed class IntervalGenerator
     private static bool IsRespawnLoadLevel(RoomEvent loadLevel)
         => string.Equals(GetNoteString(loadLevel, "playerIntro"), "Respawn", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsStrawberryCollect(RoomEvent e)
+        => string.Equals(e.EventType, "strawberry_collect", StringComparison.Ordinal) ||
+           string.Equals(e.EventType, "berry_collect", StringComparison.Ordinal);
+
+    private static void AddIntroCandidate(
+        List<ClipCandidate> result,
+        HashSet<IntroIdentity> emittedIntros,
+        ref int index,
+        RoomEvent start,
+        RoomEvent end,
+        string room,
+        string? mapSid,
+        string reason)
+    {
+        if (emittedIntros.Add(new IntroIdentity(mapSid ?? string.Empty, room, start.Utc, end.Utc, reason)))
+        {
+            result.Add(new ClipCandidate(index++, start, end, room, mapSid, reason, true));
+        }
+    }
+
+    private static bool SuccessfulAttemptAlreadyCoversIntro(IReadOnlyList<ClipCandidate> successfulAttemptCandidates, RoomIntro intro)
+        => successfulAttemptCandidates.Any(c =>
+            !c.IsCheckpointIntro &&
+            SameMapAndRoom(c.Start, intro.Entry) &&
+            c.Start.Utc <= intro.Entry.Utc &&
+            c.End.Utc >= intro.InitialCheckpoint.Utc);
+
     private static bool IsReverseTransition(RoomEvent forward, RoomEvent reversed)
         => SameMap(forward, reversed) &&
            string.Equals(forward.Room ?? string.Empty, reversed.NextRoom ?? string.Empty, StringComparison.Ordinal) &&
@@ -604,6 +680,9 @@ public sealed class IntervalGenerator
 
     private static bool SameRoom(RoomEvent left, RoomEvent right)
         => string.Equals(left.Room ?? string.Empty, right.Room ?? string.Empty, StringComparison.Ordinal);
+
+    private static bool SameMapAndRoom(RoomEvent left, RoomEvent right)
+        => SameMap(left, right) && SameRoom(left, right);
 
     private static string? GetNoteString(RoomEvent e, string key)
     {
@@ -653,6 +732,16 @@ public sealed class IntervalGenerator
         public RoomEvent? InitialCheckpoint { get; set; }
         public bool HadDeath { get; set; }
     }
+
+    private readonly record struct RoomIdentity(string MapSid, string Room)
+    {
+        public static RoomIdentity From(RoomEvent e)
+            => new(e.MapSid ?? string.Empty, e.Room ?? string.Empty);
+    }
+
+    private readonly record struct RoomIntro(RoomEvent Entry, RoomEvent InitialCheckpoint);
+
+    private readonly record struct IntroIdentity(string MapSid, string Room, DateTimeOffset StartUtc, DateTimeOffset EndUtc, string Reason);
 
     private sealed class PreparedClip
     {

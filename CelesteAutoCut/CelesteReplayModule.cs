@@ -33,12 +33,14 @@ public sealed class CelesteAutoCutModule : EverestModule {
         obsAutoAssemblerStartPending = true;
         On.Monocle.MInput.Update += OnMInputUpdate;
         On.Celeste.Level.Update += OnLevelUpdate;
+        On.Celeste.Strawberry.OnCollect += OnStrawberryCollect;
         Everest.Events.Player.OnDie += OnPlayerDie;
     }
 
     public override void Unload() {
         On.Monocle.MInput.Update -= OnMInputUpdate;
         On.Celeste.Level.Update -= OnLevelUpdate;
+        On.Celeste.Strawberry.OnCollect -= OnStrawberryCollect;
         Everest.Events.Player.OnDie -= OnPlayerDie;
         controller.Stop();
         successfulClearRecorder.Stop(discard: true);
@@ -50,6 +52,14 @@ public sealed class CelesteAutoCutModule : EverestModule {
         if (Settings.Enabled) {
             successfulClearRecorder.OnDeath();
             roomClipRecorder.OnDeath(player);
+        }
+    }
+
+    private void OnStrawberryCollect(On.Celeste.Strawberry.orig_OnCollect orig, Strawberry self) {
+        orig(self);
+
+        if (Settings.Enabled) {
+            roomClipRecorder.OnStrawberryCollect(self);
         }
     }
 
