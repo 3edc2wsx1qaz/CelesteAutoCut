@@ -205,3 +205,13 @@ public sealed record AssemblyPlan
     public List<string> Warnings { get; init; } = [];
     public List<string> IncludedClipIds { get; init; } = [];
 }
+
+public sealed record MapAssemblyOutput
+{
+    public string? MapSid { get; init; }
+    public string FinalOutputPath { get; init; } = "";
+    public string AssemblyDirectory { get; init; } = "";
+    public int ClipCount { get; init; }
+    public string PrecisionMode { get; init; } = "precise_reencode";
+    public List<string> Warnings { get; init; } = [];
+}

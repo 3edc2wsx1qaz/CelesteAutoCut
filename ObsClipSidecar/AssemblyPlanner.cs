@@ -104,6 +104,63 @@ public sealed class AssemblyPlanner
         return executedPlan;
     }
 
+    public List<MapAssemblyOutput> AssembleByMap(
+        ClipIntervalsDocument intervals,
+        string outputDirectory,
+        Func<string?, string> finalOutputPathResolver,
+        AssemblyOptions options)
+    {
+        outputDirectory = Path.GetFullPath(outputDirectory);
+        var groups = GroupKeptClipsByMap(intervals);
+        if (groups.Count == 0)
+        {
+            throw new InvalidOperationException("No valid clips available for assembly.");
+        }
+
+        var targets = ResolveMapOutputTargets(groups, finalOutputPathResolver, outputDirectory);
+
+        var outputs = new List<MapAssemblyOutput>();
+        for (var index = 0; index < targets.Count; index++)
+        {
+            var target = targets[index];
+            var group = target.Group;
+            var finalOutputPath = target.FinalOutputPath;
+            var groupIntervals = intervals with
+            {
+                Clips = group.Clips,
+                InvalidClips = intervals.InvalidClips
+                    .Where(c => string.Equals(c.MapSid ?? string.Empty, group.MapSid ?? string.Empty, StringComparison.Ordinal))
+                    .ToList()
+            };
+            var groupOutputDirectory = index == 0
+                ? outputDirectory
+                : Path.Combine(outputDirectory, SafeArtifactName(group.MapSid, index));
+            var plan = options.DryRun
+                ? WriteDryRunArtifacts(groupIntervals, groupOutputDirectory, options with { FinalOutputPath = finalOutputPath })
+                : Assemble(groupIntervals, groupOutputDirectory, options with { FinalOutputPath = finalOutputPath });
+            var warnings = plan.Warnings;
+            if (target.CollisionAdjusted)
+            {
+                warnings = warnings
+                    .Concat(["final_output_collision_avoided_by_map_folder"])
+                    .Distinct()
+                    .ToList();
+            }
+            outputs.Add(new MapAssemblyOutput
+            {
+                MapSid = group.MapSid,
+                FinalOutputPath = plan.FinalOutputPath,
+                AssemblyDirectory = groupOutputDirectory,
+                ClipCount = group.Clips.Count,
+                PrecisionMode = plan.PrecisionMode,
+                Warnings = warnings
+            });
+        }
+
+        JsonFile.Write(Path.Combine(outputDirectory, "map_outputs.json"), outputs);
+        return outputs;
+    }
+
     private static void ExecutePrecisePipeline(List<ClipInterval> kept, string outputDirectory, string finalOutputPath, string ffmpegPath, AssemblyOptions options)
     {
         var sliceList = FlattenSlices(kept);
@@ -195,6 +252,57 @@ public sealed class AssemblyPlanner
     private static List<ClipInterval> GetKeptClips(ClipIntervalsDocument intervals) =>
         intervals.Clips.Where(c => c.IsValid && c.SourceFileMapping.Count > 0).ToList();
 
+    private static List<MapClipGroup> GroupKeptClipsByMap(ClipIntervalsDocument intervals)
+    {
+        var groups = new List<MapClipGroup>();
+        foreach (var clip in GetKeptClips(intervals))
+        {
+            var mapSid = string.IsNullOrWhiteSpace(clip.MapSid) ? null : clip.MapSid;
+            var group = groups.FirstOrDefault(g => string.Equals(g.MapSid ?? string.Empty, mapSid ?? string.Empty, StringComparison.Ordinal));
+            if (group is null)
+            {
+                group = new MapClipGroup(mapSid);
+                groups.Add(group);
+            }
+
+            group.Clips.Add(clip);
+        }
+
+        return groups;
+    }
+
+    private static List<MapOutputTarget> ResolveMapOutputTargets(
+        List<MapClipGroup> groups,
+        Func<string?, string> finalOutputPathResolver,
+        string fallbackDirectory)
+    {
+        var targets = groups
+            .Select((group, index) => new MapOutputTarget(group, index, finalOutputPathResolver(group.MapSid)))
+            .ToList();
+        var collisions = targets
+            .GroupBy(t => FullPathKey(t.FinalOutputPath), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g)
+            .ToHashSet();
+
+        foreach (var target in targets.Where(collisions.Contains))
+        {
+            var fullPath = Path.GetFullPath(target.FinalOutputPath);
+            var directory = Path.GetDirectoryName(fullPath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                directory = fallbackDirectory;
+            }
+
+            target.FinalOutputPath = Path.Combine(directory, SafeArtifactName(target.Group.MapSid, target.Index), Path.GetFileName(fullPath));
+            target.CollisionAdjusted = true;
+        }
+
+        return targets;
+    }
+
+    private static string FullPathKey(string path) => Path.GetFullPath(path);
+
     private static List<ClipFileSlice> FlattenSlices(List<ClipInterval> clips) =>
         clips.SelectMany(c => c.SourceFileMapping).ToList();
 
@@ -239,4 +347,29 @@ public sealed class AssemblyPlanner
     private static string Quote(string path) => '"' + path.Replace("\"", "\\\"") + '"';
 
     private static string QuoteForFfconcat(string path) => "'" + path.Replace("'", "'\\''") + "'";
+
+    private static string SafeArtifactName(string? value, int index)
+    {
+        var name = string.IsNullOrWhiteSpace(value) ? "UnknownMap" : value.Trim().Replace('\\', '_').Replace('/', '_');
+        foreach (var c in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(c, '_');
+        }
+
+        name = name.Trim().TrimEnd('.');
+        return string.IsNullOrWhiteSpace(name) ? $"map_{index:D2}" : $"{index:D2}_{name}";
+    }
+
+    private sealed record MapClipGroup(string? MapSid)
+    {
+        public List<ClipInterval> Clips { get; } = [];
+    }
+
+    private sealed class MapOutputTarget(MapClipGroup group, int index, string finalOutputPath)
+    {
+        public MapClipGroup Group { get; } = group;
+        public int Index { get; } = index;
+        public string FinalOutputPath { get; set; } = finalOutputPath;
+        public bool CollisionAdjusted { get; set; }
+    }
 }

@@ -26,7 +26,9 @@ public static class SelfTests
             ("manifest builder honors record_file_changed newOutputPath", ManifestBuilderUsesNewOutputPath),
             ("manifest builder waits for terminal stop path after stopping transition", ManifestBuilderWaitsForTerminalStopPath),
             ("json reader is case insensitive for mod output", CaseInsensitiveJsonRead),
-            ("assembly plan defaults to precise mode", AssemblyDefaultsToPrecise)
+            ("assembly plan defaults to precise mode", AssemblyDefaultsToPrecise),
+            ("assembly groups one recording into per-map outputs", AssemblyGroupsOneRecordingIntoPerMapOutputs),
+            ("assembly disambiguates colliding map outputs", AssemblyDisambiguatesCollidingMapOutputs)
         };
 
         var failures = 0;
@@ -254,8 +256,8 @@ public static class SelfTests
 
         var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
         Assert(roomBClips.Count == 2, "expected intro clip plus successful attempt after death in room b");
-        Assert(roomBClips[0].Reasons.Contains("room_entry_before_first_death"), "death room should preserve entry through the first failed attempt");
-        Assert(roomBClips[0].StartUtc == roomBEnter && roomBClips[0].EndUtc == roomBEnter.AddMilliseconds(700), "death-room entry boundaries mismatch");
+        Assert(roomBClips[0].Reasons.Contains("room_entry_intro_before_clear"), "death room should preserve entry through initial load_level");
+        Assert(roomBClips[0].StartUtc == roomBEnter && roomBClips[0].EndUtc == introLoad, "death-room intro boundaries mismatch");
         Assert(roomBClips[1].Reasons.Contains("final_successful_attempt"), "second room-b clip should be the successful attempt");
         Assert(roomBClips[1].StartUtc == respawnLoad && roomBClips[1].EndUtc == clear, "successful attempt should restart from respawn load_level");
     }
@@ -289,11 +291,11 @@ public static class SelfTests
         });
 
         var roomBClips = doc.Clips.Where(c => c.Room == "b").OrderBy(c => c.StartUtc).ToList();
-        Assert(roomBClips.Count == 4, "each visit to branching room b should keep entry-to-first-death plus final success");
-        Assert(roomBClips.Count(c => c.Reasons.Contains("room_entry_before_first_death")) == 2, "both b visits should keep their own entry-death clip");
+        Assert(roomBClips.Count == 4, "each visit to branching room b should keep entry-to-load-level plus final success");
+        Assert(roomBClips.Count(c => c.Reasons.Contains("room_entry_intro_before_clear")) == 2, "both b visits should keep their own entry-load intro clip");
         Assert(roomBClips.Where(c => c.Reasons.Contains("final_successful_attempt")).All(c => c.StartUtc != start.AddMilliseconds(1_500) && c.StartUtc != start.AddMilliseconds(4_500)), "death timestamps must not become successful clip starts");
-        Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_500), "first b visit entry-death boundaries mismatch");
-        Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_500), "second b visit entry-death boundaries mismatch");
+        Assert(roomBClips[0].StartUtc == start.AddSeconds(1) && roomBClips[0].EndUtc == start.AddMilliseconds(1_010), "first b visit entry-load boundaries mismatch");
+        Assert(roomBClips[2].StartUtc == start.AddSeconds(4) && roomBClips[2].EndUtc == start.AddMilliseconds(4_010), "second b visit entry-load boundaries mismatch");
     }
 
     private static void UnfinishedRoomKeepsIntroAtEnd()
@@ -430,6 +432,111 @@ public static class SelfTests
         Assert(plan.FfmpegCommand.Contains("final concat reencode", StringComparison.Ordinal), "precise assembly should document final concat reencode to avoid copied timestamp gaps");
         Assert(plan.FfconcatText.Contains("ffconcat version 1.0"), "dry-run should still emit ffconcat preview plan");
         Assert(plan.SegmentConcatText?.Contains("precise_segments/segment_0000.mp4") == true, "precise segment concat should be emitted");
+    }
+
+    private static void AssemblyGroupsOneRecordingIntoPerMapOutputs()
+    {
+        var doc = new ClipIntervalsDocument
+        {
+            Clips =
+            [
+                new ClipInterval
+                {
+                    ClipId = "a",
+                    Room = "a",
+                    MapSid = "Maps/Alpha",
+                    IsValid = true,
+                    SourceFileMapping = [new ClipFileSlice { SourcePath = "run.mkv", SourceStartDurationMs = 0, SourceEndDurationMs = 1_000 }]
+                },
+                new ClipInterval
+                {
+                    ClipId = "b",
+                    Room = "b",
+                    MapSid = "Maps/Beta",
+                    IsValid = true,
+                    SourceFileMapping = [new ClipFileSlice { SourcePath = "run.mkv", SourceStartDurationMs = 1_000, SourceEndDurationMs = 2_000 }]
+                },
+                new ClipInterval
+                {
+                    ClipId = "c",
+                    Room = "c",
+                    MapSid = "Maps/Alpha",
+                    IsValid = true,
+                    SourceFileMapping = [new ClipFileSlice { SourcePath = "run.mkv", SourceStartDurationMs = 2_000, SourceEndDurationMs = 3_000 }]
+                }
+            ]
+        };
+
+        var root = Path.Combine(Path.GetTempPath(), "CelesteAutoCutSelfTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var outputs = new AssemblyPlanner().AssembleByMap(
+                doc,
+                root,
+                mapSid => Path.Combine(root, (mapSid ?? "Unknown").Replace('/', '_') + ".mp4"),
+                new AssemblyOptions { DryRun = true });
+
+            Assert(outputs.Count == 2, "expected one output per map SID");
+            Assert(outputs[0].MapSid == "Maps/Alpha" && outputs[0].ClipCount == 2, "alpha output should keep both alpha clips");
+            Assert(outputs[1].MapSid == "Maps/Beta" && outputs[1].ClipCount == 1, "beta output should keep beta clip");
+            Assert(File.Exists(Path.Combine(root, "map_outputs.json")), "map output manifest should be written");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    private static void AssemblyDisambiguatesCollidingMapOutputs()
+    {
+        var doc = new ClipIntervalsDocument
+        {
+            Clips =
+            [
+                new ClipInterval
+                {
+                    ClipId = "a",
+                    Room = "a",
+                    MapSid = "Maps/Alpha",
+                    IsValid = true,
+                    SourceFileMapping = [new ClipFileSlice { SourcePath = "run.mkv", SourceStartDurationMs = 0, SourceEndDurationMs = 1_000 }]
+                },
+                new ClipInterval
+                {
+                    ClipId = "b",
+                    Room = "b",
+                    MapSid = "Maps/Beta",
+                    IsValid = true,
+                    SourceFileMapping = [new ClipFileSlice { SourcePath = "run.mkv", SourceStartDurationMs = 1_000, SourceEndDurationMs = 2_000 }]
+                }
+            ]
+        };
+
+        var root = Path.Combine(Path.GetTempPath(), "CelesteAutoCutSelfTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var collidingPath = Path.Combine(root, "2026-05-19 20-31-08.mp4");
+            var outputs = new AssemblyPlanner().AssembleByMap(
+                doc,
+                root,
+                _ => collidingPath,
+                new AssemblyOptions { DryRun = true });
+
+            Assert(outputs.Count == 2, "expected both maps to be assembled");
+            Assert(outputs.Select(o => Path.GetFullPath(o.FinalOutputPath)).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2, "colliding map outputs must be disambiguated");
+            Assert(outputs.All(o => o.Warnings.Contains("final_output_collision_avoided_by_map_folder")), "colliding outputs should report the map-folder adjustment");
+            Assert(outputs.All(o => Path.GetDirectoryName(o.FinalOutputPath)?.StartsWith(root, StringComparison.OrdinalIgnoreCase) == true), "adjusted outputs should stay under the requested output root");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     private static readonly DateTimeOffset BaseUtc = new(2026, 5, 18, 0, 0, 0, TimeSpan.Zero);

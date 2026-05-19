@@ -14,6 +14,7 @@ internal sealed class ObsAutoAssemblerLauncher {
     private Process? process;
     private Task? startTask;
     private int launchAttemptId;
+    private bool stopping;
 
     public ObsAutoAssemblerLauncher(ReplayController replayController) {
         this.replayController = replayController;
@@ -36,6 +37,7 @@ internal sealed class ObsAutoAssemblerLauncher {
             launchAttemptId++;
             processToStop = process;
             process = null;
+            stopping = processToStop is not null;
         }
 
         try {
@@ -108,6 +110,7 @@ internal sealed class ObsAutoAssemblerLauncher {
                 }
 
                 process = startedProcess;
+                stopping = false;
             }
 
             _ = PumpOutputAsync(startedProcess.StandardOutput, stdoutPath);
@@ -126,6 +129,7 @@ internal sealed class ObsAutoAssemblerLauncher {
 
     private void OnProcessExited(Process exitedProcess) {
         int? exitCode = null;
+        bool expectedExit = false;
         try {
             exitCode = exitedProcess.ExitCode;
         } catch {
@@ -133,9 +137,16 @@ internal sealed class ObsAutoAssemblerLauncher {
         }
 
         lock (gate) {
+            expectedExit = stopping;
             if (ReferenceEquals(process, exitedProcess)) {
                 process = null;
             }
+            stopping = false;
+        }
+
+        if (expectedExit || exitCode == 0) {
+            exitedProcess.Dispose();
+            return;
         }
 
         Log($"OBS auto-assembler helper exited with code {exitCode?.ToString() ?? "unknown"}.", LogLevel.Warn);

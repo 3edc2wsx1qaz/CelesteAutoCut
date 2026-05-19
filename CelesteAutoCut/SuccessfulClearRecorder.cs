@@ -10,7 +10,6 @@ using Monocle;
 namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class SuccessfulClearRecorder {
-    private const string Tag = "CelesteAutoCut";
     private readonly ReplayController replayController;
 
     private readonly List<ReplayFrame> currentAttempt = [];
@@ -114,10 +113,6 @@ internal sealed class SuccessfulClearRecorder {
             return;
         }
 
-        if (!discard) {
-            Log("Successful-clear recording stopped.");
-        }
-
         active = false;
         currentAttempt.Clear();
         successfulSegments.Clear();
@@ -153,7 +148,6 @@ internal sealed class SuccessfulClearRecorder {
 
     private void Export(string finalCheckpoint) {
         if (successfulSegments.Count == 0) {
-            Log("No successful checkpoint segments to export.", LogLevel.Warn);
             return;
         }
 
@@ -186,8 +180,6 @@ internal sealed class SuccessfulClearRecorder {
             string stampedPath = Path.Combine(replayController.ReplayDirectory, $"{timestamp}_{sid}_{areaMode}_clear.json");
             File.WriteAllText(stampedPath, json);
         }
-
-        Log($"Exported successful clear: {export.Segments.Count} segments, {export.Frames.Count} frames.");
     }
 
     private static string CheckpointName(string? roomName) {
@@ -207,11 +199,5 @@ internal sealed class SuccessfulClearRecorder {
         return string.IsNullOrWhiteSpace(fileName) ? fallback : fileName;
     }
 
-    private static void Log(string message, LogLevel level = LogLevel.Info) {
-        Logger.Log(level, Tag, message);
-        if (level >= LogLevel.Warn) {
-            Engine.Commands?.Log($"[{Tag}] {message}");
-        }
-    }
 }
 

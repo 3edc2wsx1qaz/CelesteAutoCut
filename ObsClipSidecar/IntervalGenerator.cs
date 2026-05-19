@@ -262,17 +262,16 @@ public sealed class IntervalGenerator
             if (e.EventType is "death" && SameRoom(current.Entry, e))
             {
                 current.HadDeath = true;
-                current.FirstDeath ??= e;
                 continue;
             }
 
             if (e.EventType is "transition" or "level_complete")
             {
-                if (current.FirstDeath is not null &&
+                if (current.InitialCheckpoint is not null &&
                     SameRoom(current.Entry, e) &&
                     current.HadDeath)
                 {
-                    result.Add(new ClipCandidate(index++, current.Entry, current.FirstDeath, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_before_first_death", true));
+                    result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_before_clear", true));
                 }
 
                 current = null;
@@ -615,7 +614,6 @@ public sealed class IntervalGenerator
 
         public RoomEvent Entry { get; }
         public RoomEvent? InitialCheckpoint { get; set; }
-        public RoomEvent? FirstDeath { get; set; }
         public bool HadDeath { get; set; }
     }
 

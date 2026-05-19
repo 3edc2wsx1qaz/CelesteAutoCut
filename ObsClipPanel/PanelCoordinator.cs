@@ -202,14 +202,23 @@ public sealed class PanelCoordinator : BackgroundService
             paths = EnsureSessionPaths(currentSessionId, settings, recordingOutputPath, recordingStartUtc, primaryMapSid) with { FinalOutputPath = finalOutputPath };
 
             var ffmpegPath = await EnsureFfmpegAsync(settings, CancellationToken.None);
-            var assemblyPlan = new AssemblyPlanner().Assemble(intervals, paths.AssemblyDirectory, new AssemblyOptions
+            var assemblyOutputs = new AssemblyPlanner().AssembleByMap(
+                intervals,
+                paths.AssemblyDirectory,
+                mapSid => stateStore.ResolveFinalOutputPath(settings.FinalOutputName, recordingOutputPath, recordingStartUtc, mapSid),
+                new AssemblyOptions
+                {
+                    DryRun = false,
+                    FastPreviewCopy = false,
+                    MaxAllowedCutErrorMs = settings.MaxCutErrorMs,
+                    FfmpegPath = ffmpegPath
+                });
+            var primaryAssembly = assemblyOutputs.FirstOrDefault();
+            if (primaryAssembly is not null)
             {
-                DryRun = false,
-                FastPreviewCopy = false,
-                MaxAllowedCutErrorMs = settings.MaxCutErrorMs,
-                FinalOutputPath = finalOutputPath,
-                FfmpegPath = ffmpegPath
-            });
+                finalOutputPath = primaryAssembly.FinalOutputPath;
+                paths = paths with { FinalOutputPath = finalOutputPath };
+            }
 
             UpdateStatus(s => s with
             {
@@ -219,7 +228,9 @@ public sealed class PanelCoordinator : BackgroundService
                 LastInvalidClipCount = intervals.InvalidClips.Count,
                 LastSuccessfulAssembleUtc = DateTimeOffset.UtcNow,
                 LastError = "",
-                LastInfo = $"Built final video with {intervals.Clips.Count} valid clip(s)."
+                LastInfo = assemblyOutputs.Count == 1
+                    ? $"Built final video with {intervals.Clips.Count} valid clip(s)."
+                    : $"Built {assemblyOutputs.Count} map video(s) with {intervals.Clips.Count} valid clip(s)."
             });
             autoAssembleInFlight = false;
 
@@ -228,9 +239,10 @@ public sealed class PanelCoordinator : BackgroundService
                 paths,
                 clips = intervals.Clips.Count,
                 invalidClips = intervals.InvalidClips.Count,
-                precisionMode = assemblyPlan.PrecisionMode,
-                finalOutput = assemblyPlan.FinalOutputPath,
-                warnings = assemblyPlan.Warnings
+                mapOutputs = assemblyOutputs,
+                precisionMode = primaryAssembly?.PrecisionMode ?? "none",
+                finalOutput = finalOutputPath,
+                warnings = assemblyOutputs.SelectMany(o => o.Warnings).Distinct().ToList()
             });
         }
         catch (Exception ex)
@@ -732,5 +744,6 @@ public sealed class PanelCoordinator : BackgroundService
             _ => value.ToString()
         };
     }
+
 }
 

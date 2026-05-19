@@ -9,7 +9,6 @@ using Monocle;
 namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
-    private const string Tag = "CelesteAutoCut";
     private const long StatusWriteIntervalFrames = 15;
     private readonly ReplayController replayController;
     private readonly JsonSerializerOptions jsonOptions = new() {
@@ -47,7 +46,6 @@ internal sealed class RoomClipRecorder {
 
     public void Start(Session session, bool fromSaveData) {
         if (!CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
-            Log("Room clip recorder disabled by settings.", LogLevel.Warn);
             return;
         }
 
@@ -192,7 +190,6 @@ internal sealed class RoomClipRecorder {
         statusDirty = false;
         lastStatusWriteFrame = long.MinValue;
         ResetObservedState();
-        Log($"Room clip logs reset: {EventLogPath}");
     }
 
     public RoomClipSessionStatus GetStatus() => new() {
@@ -309,10 +306,4 @@ internal sealed class RoomClipRecorder {
     private string currentRoomOr(string? fallback)
         => string.IsNullOrWhiteSpace(currentRoom) ? (fallback ?? string.Empty) : currentRoom;
 
-    private static void Log(string message, LogLevel level = LogLevel.Info) {
-        Logger.Log(level, Tag, message);
-        if (level >= LogLevel.Warn) {
-            Engine.Commands?.Log($"[{Tag}] {message}");
-        }
-    }
 }
