@@ -48,7 +48,6 @@ internal sealed class SuccessfulClearRecorder {
         chapterCompleteHandled = false;
         active = true;
 
-        Log($"Successful-clear recording started at checkpoint '{currentCheckpoint}'.");
     }
 
     public void RecordFrame() {
@@ -71,7 +70,6 @@ internal sealed class SuccessfulClearRecorder {
         }
 
         currentAttempt.Clear();
-        Log("Discarded failed checkpoint attempt.");
     }
 
     public void ObserveLevel(Level level, bool chapterComplete) {
@@ -147,7 +145,6 @@ internal sealed class SuccessfulClearRecorder {
                 ToCheckpoint = nextCheckpoint,
                 Frames = currentAttempt.ToList()
             });
-            Log($"Saved first successful segment '{segmentKey}' ({currentAttempt.Count} frames).");
         }
 
         currentCheckpoint = nextCheckpoint;
@@ -212,7 +209,9 @@ internal sealed class SuccessfulClearRecorder {
 
     private static void Log(string message, LogLevel level = LogLevel.Info) {
         Logger.Log(level, Tag, message);
-        Engine.Commands?.Log($"[{Tag}] {message}");
+        if (level >= LogLevel.Warn) {
+            Engine.Commands?.Log($"[{Tag}] {message}");
+        }
     }
 }
 

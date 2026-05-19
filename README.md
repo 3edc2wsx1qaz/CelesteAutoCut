@@ -1,32 +1,15 @@
-# CelesteReplay
+# CelesteAutoCut
 
-CelesteReplay 是一个 **Celeste / Everest 模组**，用于配合 **OBS Studio** 自动生成通关精简视频。
+CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** 自动生成“只保留有效游玩片段”的通关视频。
 
-它会在你正常录制和游玩时：
+典型流程：
 
-- 记录每个房间的进入 / 通过时间
-- 根据 OBS 录制时间轴自动换算出每个房间对应片段
-- 自动剪掉房间之间的多余部分
-- 将保留片段按通关顺序拼接成一个最终视频
+1. 启动 Celeste 和 OBS Studio。
+2. 在 OBS 中开始录制（推荐 `.mkv`）。
+3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
 
-目标流程只有 3 步：
+当前版本重点修复：房间切换处不再重复保留同一段转场画面；最终成片默认直接放在 OBS 录制目录；成功通关输入记录默认关闭以降低 CPU/内存占用。
 
-1. 启动 **Celeste** 和 **OBS Studio**（顺序不限）
-2. 在 OBS 中开始录制（**推荐 `.mkv`**）
-3. 正常游玩
-
-游戏结束并停止录制后，模组会自动在 **OBS 默认录制目录** 中生成成片。
-
----
-
-## 依赖
-
-### 必需
-
-- Celeste
-- Everest / EverestCore
-- OBS Studio（OBS 28+ 默认已内置 obs-websocket）
-- ffmpeg
 ---
 
 ## 安装
@@ -34,170 +17,138 @@ CelesteReplay 是一个 **Celeste / Everest 模组**，用于配合 **OBS Studio
 把发布包放到：
 
 ```text
-<Celeste>/Mods/CelesteReplay.zip
+<Celeste>/Mods/CelesteAutoCut.zip
 ```
 
 例如：
 
 ```text
-D:\Steam\steamapps\common\Celeste\Mods\CelesteReplay.zip
+D:\Steam\steamapps\common\Celeste\Mods\CelesteAutoCut.zip
 ```
 
-首次运行时，模组会自动解压并启动内置 helper 到：
+首次运行时，模组会把内置 helper 解压到：
 
 ```text
-<Celeste>/CelesteReplayTools/ObsClipPanel/
+<Celeste>/CelesteAutoCutTools/ObsClipPanel/
 ```
 
-游戏退出后，helper 会自动跟随退出。
-
-
-
-## 使用方法
-
-1. 打开 Celeste
-2. 打开 OBS Studio
-3. 在 OBS 中点击开始录制
-4. 正常游玩
-5. 结束后在 OBS 中停止录制
-
-随后模组会自动：
-
-- 读取房间事件
-- 关联录制文件与录制时间轴
-- 计算每个房间的有效片段
-- 调用 ffmpeg 生成最终视频
+游戏退出后，helper 会跟随父进程自动退出。
 
 ---
 
 ## 输出位置与命名
 
-### 最终成片文件名
-
-最终视频默认会按 **录制开始时间（本地时间）** 命名，例如：
+最终视频默认使用 **录制开始的本地时间** 命名，格式为：
 
 ```text
-2026-05-18 23-18-37.mp4
+yyyy-MM-dd HH-mm-ss.mp4
 ```
 
-默认命名与 OBS 原始录制常见形式对应，例如：
-
-- 原始录制：`2026-05-18 23-18-37.mkv`
-- 最终成片：`2026-05-18 23-18-37.mp4`
-
-### 输出目录优先级
-
-1. **本次实际录制文件所在目录**
-2. **OBS 当前配置的默认录制目录**
-3. helper 工作目录（兜底）
-
-通常情况下，你会在：
+例如：
 
 ```text
-<OBS 默认录制目录>/2026-05-18 23-18-37.mp4
+2026-05-19 20-31-08.mp4
 ```
 
-看到最终成片。
+输出目录优先级：
+
+1. 本次 OBS 实际录制文件所在目录；
+2. OBS 当前配置的默认录制目录；
+3. helper 工作目录（兜底）。
+
+为了避免 mod 地图产物被藏进难找的子目录，当前版本 **不再按地图 SID 自动创建地图子文件夹**。正常情况下，最终视频会直接出现在 OBS 录制目录里。
 
 ---
 
-## 会话与中间产物
+## 中间产物与排查路径
 
-模组工作目录：
+房间事件日志：
 
 ```text
-<Celeste>/CelesteReplayReplays/obs_auto/
+<Celeste>/CelesteAutoCutReplays/room_events.jsonl
+```
+
+helper 工作目录：
+
+```text
+<Celeste>/CelesteAutoCutReplays/obs_auto/
 ```
 
 每次录制会生成一个 session：
 
 ```text
-<Celeste>/CelesteReplayReplays/obs_auto/sessions/<session-id>/
+<Celeste>/CelesteAutoCutReplays/obs_auto/sessions/<session-id>/
 ```
 
 常见文件：
 
-- `session_manifest.json`：录制段、时间锚点、录制文件信息
-- `clip_intervals.json`：计算后的房间片段区间
-- `assembly/assembly_report.json`：最终拼接结果
-- `obs_events.jsonl`：OBS 事件日志
+- `obs_events.jsonl`：OBS 事件与录制时间轴采样；
+- `session_manifest.json`：录制段、文件、时间锚点；
+- `clip_intervals.json`：计算后的有效房间片段；
+- `assembly/assembly_report.json`：ffmpeg 拼接结果与最终输出路径。
+
+如果没有看到最终视频，优先检查最新 session 的 `assembly/assembly_report.json` 和 `clip_intervals.json`。
 
 ---
 
-## 支持的录制场景
+## 当前默认性能策略
 
-本模组考虑了以下情况：
+- `EnableRoomClipRecorder = true`：保留房间事件，用于 OBS 自动剪辑。
+- `EnableObsAutoAssembler = true`：启动内置 OBS helper。
+- `AutoExportSuccessfulClearRecords = false`：默认关闭逐帧输入记录，避免长时间游玩时占用更多内存。
+- OBS helper 默认轮询间隔提高到 `1000ms`，减少后台 CPU 占用。
+- 正常运行的 Info 级日志不再刷 Celeste 控制台；只保留警告、错误和手动命令输出。
 
-- 一次录制打完整张图
-- 中途手动停止录制，再开始新的录制
-- 同一张图分多段录制后再打完
-
-只要这些录制段都属于同一次游戏流程，模组就会尽量把房间片段正确映射到对应录制文件，再统一拼接。
-
----
-
-## ffmpeg
-
-项目会自动使用 ffmpeg 进行裁剪和拼接。
-
-优先级如下：
-
-1. 使用你手动指定的 `ffmpeg.exe`
-2. 使用系统中可找到的 ffmpeg
-3. 使用模组工作目录下自动准备的 ffmpeg
-
-也就是说，**普通使用者通常不需要手动安装 ffmpeg**。
+说明：`AutoExportSuccessfulClearRecords` 只影响额外导出的逐帧输入 JSON，不影响最终视频自动剪辑。
 
 ---
 
-## 配置
+## 房间切换剪辑规则
 
-默认关键开关：
+相邻房间片段会在实际 transition 边界处对齐：
 
-- `EnableRoomClipRecorder = true`
-- `EnableObsAutoAssembler = true`
-
-常用配置项：
-
-- `ObsAutoAssemblerRelativePath`
-  - 默认：`ObsClipPanel\ObsClipPanel.exe`
-  - 相对于 `<Celeste>/CelesteReplayTools/`
-- `ObsAutoAssemblerWorkingDirectoryName`
-  - 默认：`obs_auto`
-- `ObsAutoAssemblerFfmpegPath`
-  - 可手动指定 ffmpeg 路径
-
-如果你没有特殊需求，保持默认即可。
+- 上一个房间不会再把 post-roll 延伸进下一个房间；
+- 下一个房间不会再把 pre-roll 回卷到上一个房间；
+- `clip_intervals.json` 会记录 `adjacent_room_overlap_trimmed`，表示相邻片段已去重对齐。
 
 ---
 
-## 已验证流程
+## 关于存档
 
-本项目已完成真实环境联调，验证过：
+CelesteAutoCut 不会读写或删除 Celeste 存档文件。代码只会写入：
 
-- Celeste + Everest 正常启动
-- OBS 正常录制
-- 1A TAS 自动通关测试
-- 自动识别房间通过时间
-- 自动裁剪并拼接成片
-- 最终输出到 OBS 默认录制目录
-- 最终文件名按录制开始时间命名
+- `<Celeste>/CelesteAutoCutReplays/` 下的事件、session、临时拼接文件；
+- OBS 录制目录中的最终视频；
+- `<Celeste>/CelesteAutoCutTools/` 下的 helper 文件。
 
-最新真实测试结果（2026-05-18）：
+如果某张 mod 地图的存档看起来消失，建议先确认 Everest 是否加载了同一套 mod、同一存档槽，以及 `Mods` 目录里是否只有一个活动的 `CelesteAutoCut*.zip`。
 
-- session：`D:\Steam\steamapps\common\Celeste\CelesteReplayReplays\obs_auto\sessions\20260518-151837`
-- 原始录制：`E:\obs_video\2026-05-18 23-18-37.mkv`
-- 最终视频：`E:\obs_video\2026-05-18 23-18-37.mp4`
-- 有效片段数：`20`
-- 无效片段数：`0`
+---
 
-自动化测试脚本：
+## 常用故障排查
 
-```powershell
-CelesteReplay\Scripts\real-zip-only-test.ps1
+### 1. 停止 OBS 录制后没看到最终视频
+
+检查：
+
+- OBS 是否真的开始录制；
+- OBS websocket 是否启用并连接；
+- `<Celeste>/CelesteAutoCutReplays/obs_auto/sessions/<session-id>/` 是否生成；
+- `assembly/assembly_report.json` 中的 `finalOutputPath`。
+
+### 2. 游戏里还是旧行为
+
+在真实环境测试或安装前，确保：
+
+```text
+D:\Steam\steamapps\common\Celeste\Mods
 ```
 
-该脚本现在会在测试前自动清理 `Mods` 目录中的旧 `CelesteReplay-*.zip` 副本，避免误加载旧包。
+中只有一个活动的 `CelesteAutoCut*.zip`。删除旧的 `CelesteAutoCut-*.zip` 副本，避免 Everest 加载旧包。
+
+### 3. 控制台出现大量失败尝试日志
+
+当前版本已移除 `Discarded failed checkpoint attempt` 这类正常失败尝试日志，并默认关闭对应的逐帧输入记录功能。
 
 ---
 
@@ -206,86 +157,37 @@ CelesteReplay\Scripts\real-zip-only-test.ps1
 发布命令：
 
 ```powershell
-.\.dotnet\dotnet.exe publish .\CelesteReplay\CelesteReplay\CelesteReplay.csproj -c Release
+..\.dotnet\dotnet.exe publish .\CelesteAutoCut\CelesteAutoCut.csproj -c Release
 ```
 
 打包产物：
 
-- 发布 zip：`CelesteReplay\artifacts\release\CelesteReplay.zip`
-- 同步副本：`CelesteReplay\CelesteReplay.zip`
-- publish 目录：`CelesteReplay\artifacts\publish\`
+- `artifacts/release/CelesteAutoCut.zip`
+- `CelesteAutoCut.zip`
+- `artifacts/publish/`
 
-zip 中会包含：
+zip 中包含：
 
 - `everest.yaml`
 - `README.md`
-- `bin/CelesteReplay.dll`
-- `bin/CelesteReplay.deps.json`
+- `bin/CelesteAutoCut.dll`
+- `bin/CelesteAutoCut.deps.json`
 
-helper 可执行文件不会以散文件形式放在 zip 根目录，而是以内嵌 payload 的方式随 DLL 一起分发，由模组在运行时自动释放。
-
----
-
-## 故障排查
-
-### 1. 录制后没有生成最终视频
-
-优先检查：
-
-- OBS 是否真的开始了录制
-- OBS 是否启用了 websocket
-- 录制格式是否正常（推荐 `.mkv`）
-- 是否生成了 session 目录
-
-可查看：
-
-```text
-<Celeste>/CelesteReplayReplays/obs_auto/
-```
-
-### 2. 明明重新打包了，但游戏里还是旧行为
-
-先检查 `Mods` 目录里是否残留了额外的旧包，例如：
-
-- `CelesteReplay-20260518-225330.zip`
-
-删除旧副本，只保留一个正式的：
-
-```text
-CelesteReplay.zip
-```
-
-### 3. 游戏关闭后 helper 还在
-
-当前版本已实现父进程跟踪，正常情况下游戏退出后 helper 会自动退出。
-
-### 4. 想保留完整原始录像
-
-模组不会删除 OBS 原始录制文件；它只会额外生成精简后的最终成片。
+helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 
 ---
 
-## 适合长期使用的目录说明
+## 验证
 
-- `CelesteReplay/artifacts/release/`
-  - 正式发布包目录
-- `CelesteReplay/artifacts/publish/`
-  - `dotnet publish` 输出
-- `CelesteReplay/CelesteReplay.zip`
-  - 方便直接拖进 Mods 的副本
+本次变更使用的验证：
 
-如果你只关心安装，请直接使用：
-
-```text
-CelesteReplay/artifacts/release/CelesteReplay.zip
+```powershell
+..\.dotnet\dotnet.exe run --project .\ObsClipSidecar\ObsClipSidecar.csproj -- self-test
+..\.dotnet\dotnet.exe publish .\CelesteAutoCut\CelesteAutoCut.csproj -c Release
 ```
 
----
+真实环境脚本：
 
-## 2026-05-19 最新实现说明
-
-- 游戏侧运行时现在只保留 `Player.OnDie` 事件监听。
-- 原先依赖 `Level.OnEnter / OnLoadLevel / OnTransitionTo / OnComplete / OnExit` 的逻辑，改为在运行时根据当前 `Level / Session / Room` 状态变化推断。
-- 同时保留了前一轮的性能优化：
-  - `room_clip_session.json` 改为节流写盘；
-  - 输入采集去掉每帧 `LINQ / HashSet` 临时分配。
+```powershell
+.\Scripts\real-zip-only-test.ps1
+```

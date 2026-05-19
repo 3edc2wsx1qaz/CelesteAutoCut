@@ -954,17 +954,11 @@ console load 1
         $firstRecordingPath = $recordingFiles[0].path
     }
     $expectedFinalOutputFileName = $null
-    if ($firstRecordingPath) {
-        $expectedFinalOutputFileName = ([System.IO.Path]::GetFileNameWithoutExtension($firstRecordingPath)) + '.mp4'
-    } elseif (@($manifest.recordings).Count -gt 0 -and $manifest.recordings[0].startUtc) {
+    if (@($manifest.recordings).Count -gt 0 -and $manifest.recordings[0].startUtc) {
         $expectedFinalOutputFileName = ([DateTimeOffset]::Parse([string]$manifest.recordings[0].startUtc).ToLocalTime().ToString('yyyy-MM-dd HH-mm-ss')) + '.mp4'
+    } elseif ($firstRecordingPath) {
+        $expectedFinalOutputFileName = ([System.IO.Path]::GetFileNameWithoutExtension($firstRecordingPath)) + '.mp4'
     }
-    $primaryMapSid = $null
-    if (@($clipDoc.clips).Count -gt 0) {
-        $primaryMapSid = Get-PropValue $clipDoc.clips[0] @('mapSid', 'MapSid')
-    }
-    $mapFolderName = Get-MapFolderName -MapSid $primaryMapSid
-
     $expectedOutputDirRoot = if ($firstRecordingPath) {
         Split-Path -Parent $firstRecordingPath
     } elseif ($obsDefaultRecordingDir) {
@@ -972,11 +966,7 @@ console load 1
     } else {
         Split-Path -Parent $sessionFinalOutputPathHint
     }
-    $expectedOutputDir = if ($expectedOutputDirRoot) {
-        Join-Path $expectedOutputDirRoot $mapFolderName
-    } else {
-        $null
-    }
+    $expectedOutputDir = $expectedOutputDirRoot
     $expectedFinalOutputPath = if ($expectedOutputDir -and $expectedFinalOutputFileName) {
         Join-Path $expectedOutputDir $expectedFinalOutputFileName
     } else {
@@ -1056,7 +1046,6 @@ console load 1
         invalidClipCount = @($clipDoc.invalidClips).Count
         precisionMode = $assemblyReport.precisionMode
         assemblyEvidenceSource = $assemblyEvidence.Source
-        mapFolderName = $mapFolderName
         helperExtracted = $helperExtracted
         helperExe = $helperExe
         tasState = $tasState

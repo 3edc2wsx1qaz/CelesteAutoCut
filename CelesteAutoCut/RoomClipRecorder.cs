@@ -311,6 +311,8 @@ internal sealed class RoomClipRecorder {
 
     private static void Log(string message, LogLevel level = LogLevel.Info) {
         Logger.Log(level, Tag, message);
-        Engine.Commands?.Log($"[{Tag}] {message}");
+        if (level >= LogLevel.Warn) {
+            Engine.Commands?.Log($"[{Tag}] {message}");
+        }
     }
 }

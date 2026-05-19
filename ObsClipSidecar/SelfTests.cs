@@ -13,6 +13,8 @@ public static class SelfTests
             ("split file maps clip into multiple slices", SplitFile),
             ("pause overlap splits clip and marks pause policy", PauseOverlap),
             ("adjacent rooms trim overlapping transition footage", AdjacentRoomOverlapTrim),
+            ("adjacent rooms cut exactly at transition boundary", AdjacentRoomTransitionBoundaryTrim),
+            ("checkpoint lobby entered before recording still yields clip", CheckpointLobbyEnteredBeforeRecording),
             ("load level becomes attempt reset after death", LoadLevelResetsAttempt),
             ("first room keeps room-entry intro before clear", FirstRoomKeepsIntroBeforeClear),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
@@ -127,7 +129,54 @@ public static class SelfTests
 
         Assert(doc.Clips.Count == 2, "expected both rooms to remain valid");
         Assert(doc.Clips[0].EndOutputDurationMs == doc.Clips[1].StartOutputDurationMs, "adjacent room clips should be seam-joined without overlap");
+        Assert(doc.Clips[0].EndOutputDurationMs == 4_000, "adjacent room seam should stay on the observed transition boundary");
+        Assert(doc.Clips[0].Reasons.Contains("adjacent_room_overlap_trimmed"), "first room should record overlap trim reason");
         Assert(doc.Clips[1].Reasons.Contains("adjacent_room_overlap_trimmed"), "second room should record overlap trim reason");
+    }
+
+    private static void AdjacentRoomTransitionBoundaryTrim()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start.AddSeconds(2), Room = "b", MapSid = "map" },
+            new() { EventType = "transition", Utc = start.AddSeconds(4), Room = "b", NextRoom = "c", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 1_000,
+            PostRollMs = 1_000,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        Assert(doc.Clips.Count == 2, "expected both adjacent rooms to remain valid");
+        Assert(doc.Clips[0].EndOutputDurationMs == 4_000, "first room should end at the transition boundary, not include the next room preroll");
+        Assert(doc.Clips[1].StartOutputDurationMs == 4_000, "second room should start at the transition boundary, not duplicate first-room postroll");
+    }
+
+    private static void CheckpointLobbyEnteredBeforeRecording()
+    {
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = BaseUtc.AddSeconds(-1), Room = "lobby", MapSid = "Mod/CheckpointLobby" },
+            new() { EventType = "load_level", Utc = BaseUtc.AddMilliseconds(-500), Room = "lobby", MapSid = "Mod/CheckpointLobby", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "transition", Utc = BaseUtc.AddSeconds(2), Room = "lobby", NextRoom = "a-00", MapSid = "Mod/CheckpointLobby" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "mod-run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 250,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        Assert(doc.Clips.Count == 1, "checkpoint lobby should still produce a valid first clip after recording starts");
+        Assert(doc.Clips[0].StartOutputDurationMs == 0, "clip should be clamped to the recording start");
+        Assert(doc.Clips[0].EndOutputDurationMs == 2_000, "clip should end at the lobby transition");
+        Assert(doc.Clips[0].Reasons.Contains("start_clamped_to_recording_start"), "clip should explain the recording-start clamp");
     }
 
     private static void LoadLevelResetsAttempt()

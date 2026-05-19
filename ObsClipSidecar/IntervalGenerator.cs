@@ -41,10 +41,19 @@ public sealed class IntervalGenerator
             var startEstimate = EstimateBoundary(candidate.Start.Utc, manifest, options.MaxAllowedAnchorGapMs);
             var endEstimate = EstimateBoundary(candidate.End.Utc, manifest, options.MaxAllowedAnchorGapMs);
             var baseReasons = new List<string>();
+            var annotations = new List<string>();
 
             if (!startEstimate.IsValid)
             {
-                baseReasons.AddRange(startEstimate.Reasons.Select(r => "start_" + r));
+                if (TryClampStartToRecordingStart(candidate.Start.Utc, startEstimate, endEstimate, manifest, out var clampedStartEstimate))
+                {
+                    startEstimate = clampedStartEstimate;
+                    annotations.Add("start_clamped_to_recording_start");
+                }
+                else
+                {
+                    baseReasons.AddRange(startEstimate.Reasons.Select(r => "start_" + r));
+                }
             }
 
             if (!endEstimate.IsValid)
@@ -68,7 +77,9 @@ public sealed class IntervalGenerator
             var postRollMs = candidate.IsCheckpointIntro ? 0 : options.PostRollMs;
             var startMs = Math.Max(0, startEstimate.EstimatedOutputDurationMs - preRollMs);
             var endMs = endEstimate.EstimatedOutputDurationMs + postRollMs;
-            prepared.Add(new PreparedClip(candidate, startEstimate, endEstimate, recording, startMs, endMs, baseReasons));
+            var preparedClip = new PreparedClip(candidate, startEstimate, endEstimate, recording, startMs, endMs, baseReasons);
+            preparedClip.Annotations.AddRange(annotations);
+            prepared.Add(preparedClip);
         }
 
         TrimAdjacentRoomOverlaps(prepared);
@@ -282,12 +293,31 @@ public sealed class IntervalGenerator
                 string.Equals(previous.Recording.RecordingId, clip.Recording.RecordingId, StringComparison.Ordinal) &&
                 clip.StartMs < previous.EndMs)
             {
-                clip.StartMs = previous.EndMs;
+                var seamMs = ResolveAdjacentSeamMs(previous, clip);
+                previous.EndMs = seamMs;
+                clip.StartMs = seamMs;
+                previous.Annotations.Add("adjacent_room_overlap_trimmed");
                 clip.Annotations.Add("adjacent_room_overlap_trimmed");
             }
 
             previous = clip;
         }
+    }
+
+    private static long ResolveAdjacentSeamMs(PreparedClip previous, PreparedClip current)
+    {
+        if (previous.Candidate.End.Utc <= current.Candidate.Start.Utc)
+        {
+            var previousBoundaryMs = previous.EndEstimate.EstimatedOutputDurationMs;
+            var currentBoundaryMs = current.StartEstimate.EstimatedOutputDurationMs;
+            var seamMs = Math.Max(previousBoundaryMs, currentBoundaryMs);
+            seamMs = Math.Min(seamMs, previous.EndMs);
+            seamMs = Math.Min(seamMs, current.EndMs);
+            seamMs = Math.Max(seamMs, previous.StartMs);
+            return seamMs;
+        }
+
+        return Math.Min(previous.EndMs, Math.Max(previous.StartMs, current.StartMs));
     }
 
     private static List<string> BuildValidReasons(int splitIndex, PreparedClip clip)
@@ -358,6 +388,41 @@ public sealed class IntervalGenerator
             IsValid = reasons.Count == 0,
             Reasons = reasons
         };
+    }
+
+    private static bool TryClampStartToRecordingStart(
+        DateTimeOffset originalStartUtc,
+        BoundaryEstimate originalStartEstimate,
+        BoundaryEstimate endEstimate,
+        SessionManifest manifest,
+        out BoundaryEstimate clampedStartEstimate)
+    {
+        clampedStartEstimate = originalStartEstimate;
+        if (!originalStartEstimate.Reasons.Contains("missing_bracket_anchors") ||
+            !endEstimate.IsValid ||
+            string.IsNullOrWhiteSpace(endEstimate.RecordingId))
+        {
+            return false;
+        }
+
+        var recording = manifest.Recordings.FirstOrDefault(r => string.Equals(r.RecordingId, endEstimate.RecordingId, StringComparison.Ordinal));
+        var firstAnchor = recording?.Anchors.OrderBy(a => a.Utc).FirstOrDefault();
+        if (recording is null || firstAnchor is null || originalStartUtc > firstAnchor.Utc || endEstimate.Utc < firstAnchor.Utc)
+        {
+            return false;
+        }
+
+        clampedStartEstimate = new BoundaryEstimate
+        {
+            Utc = firstAnchor.Utc,
+            RecordingId = recording.RecordingId,
+            AnchorBefore = firstAnchor,
+            AnchorAfter = firstAnchor,
+            EstimatedOutputDurationMs = firstAnchor.OutputDurationMs,
+            ErrorBoundMs = 0,
+            IsValid = true
+        };
+        return true;
     }
 
     private static long InterpolateDuration(DateTimeOffset utc, ObsAnchor before, ObsAnchor after)

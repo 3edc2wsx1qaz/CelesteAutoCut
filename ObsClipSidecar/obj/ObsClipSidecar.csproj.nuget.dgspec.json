@@ -10,7 +10,7 @@
         "projectUniqueName": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipSidecar\\ObsClipSidecar.csproj",
         "projectName": "ObsClipSidecar",
         "projectPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipSidecar\\ObsClipSidecar.csproj",
-        "packagesPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\.nuget_packages",
+        "packagesPath": "C:\\Users\\18254\\.nuget\\packages\\",
         "outputPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipSidecar\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [

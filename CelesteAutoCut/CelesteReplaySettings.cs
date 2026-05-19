@@ -42,8 +42,8 @@ public class CelesteAutoCutSettings : EverestModuleSettings {
     [SettingSubText("Optional absolute ffmpeg.exe path. Leave empty to auto-find or auto-download.")]
     public string ObsAutoAssemblerFfmpegPath { get; set; } = "";
 
-    [SettingSubText("Records the first successful input segment between checkpoint rooms and exports it on chapter clear.")]
-    public bool AutoExportSuccessfulClearRecords { get; set; } = true;
+    [SettingSubText("Records full per-frame inputs for successful checkpoint segments. Disabled by default to keep CPU/memory low.")]
+    public bool AutoExportSuccessfulClearRecords { get; set; } = false;
 
     [SettingSubText("Relative to the CelesteAutoCutReplays folder.")]
     public string SuccessfulClearFileName { get; set; } = "last_successful_clear.json";

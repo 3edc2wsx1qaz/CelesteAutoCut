@@ -7,7 +7,7 @@ public sealed record PanelSettings
     public string WorkingDirectory { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CelesteAutoCutObsPanel");
     public string RoomEventsPath { get; init; } = @"D:\Steam\steamapps\common\Celeste\CelesteAutoCutReplays\room_events.jsonl";
     public string FfmpegPath { get; init; } = "";
-    public long PollIntervalMs { get; init; } = 500;
+    public long PollIntervalMs { get; init; } = 1000;
     public long PreRollMs { get; init; } = 250;
     public long PostRollMs { get; init; } = 500;
     public long MaxAnchorGapMs { get; init; } = 2000;
@@ -25,7 +25,7 @@ public sealed record PanelSettingsInput
     public string WorkingDirectory { get; init; } = "";
     public string RoomEventsPath { get; init; } = "";
     public string FfmpegPath { get; init; } = "";
-    public long PollIntervalMs { get; init; } = 500;
+    public long PollIntervalMs { get; init; } = 1000;
     public long PreRollMs { get; init; } = 250;
     public long PostRollMs { get; init; } = 500;
     public long MaxAnchorGapMs { get; init; } = 2000;

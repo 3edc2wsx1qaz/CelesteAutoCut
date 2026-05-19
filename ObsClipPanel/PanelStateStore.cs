@@ -56,12 +56,12 @@ public sealed class PanelStateStore
         var preferredOutputDirectory = ResolvePreferredOutputDirectory(recordingOutputPath);
         var resolvedPath = Path.IsPathRooted(fileNameOrPath)
             ? Path.GetFullPath(fileNameOrPath)
-            : Path.Combine(ResolveMapOutputDirectory(preferredOutputDirectory, mapSid), fileNameOrPath);
+            : Path.Combine(preferredOutputDirectory, fileNameOrPath);
 
         if (!string.IsNullOrWhiteSpace(recordingOutputPath) &&
             string.Equals(Path.GetFullPath(recordingOutputPath), resolvedPath, StringComparison.OrdinalIgnoreCase))
         {
-            var directory = Path.GetDirectoryName(resolvedPath) ?? ResolveMapOutputDirectory(preferredOutputDirectory, mapSid);
+            var directory = Path.GetDirectoryName(resolvedPath) ?? preferredOutputDirectory;
             var stem = Path.GetFileNameWithoutExtension(resolvedPath);
             resolvedPath = Path.Combine(directory, $"{stem} - clipped.mp4");
         }
@@ -98,7 +98,7 @@ public sealed class PanelStateStore
             WorkingDirectory = NormalizeRequiredPath(input.WorkingDirectory, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CelesteAutoCutObsPanel")),
             RoomEventsPath = NormalizeRequiredPath(input.RoomEventsPath, @"D:\Steam\steamapps\common\Celeste\CelesteAutoCutReplays\room_events.jsonl"),
             FfmpegPath = string.IsNullOrWhiteSpace(input.FfmpegPath) ? "" : Path.GetFullPath(input.FfmpegPath.Trim()),
-            PollIntervalMs = Math.Max(200, input.PollIntervalMs),
+            PollIntervalMs = Math.Max(1000, input.PollIntervalMs),
             PreRollMs = Math.Max(0, input.PreRollMs),
             PostRollMs = Math.Max(0, input.PostRollMs),
             MaxAnchorGapMs = Math.Max(100, input.MaxAnchorGapMs),
@@ -316,7 +316,7 @@ public sealed class PanelStateStore
             WorkingDirectory = NormalizeRequiredPath(Read("CELESTE_REPLAY_WORKING_DIRECTORY") ?? settings.WorkingDirectory, settings.WorkingDirectory),
             RoomEventsPath = NormalizeRequiredPath(Read("CELESTE_REPLAY_ROOM_EVENTS_PATH") ?? settings.RoomEventsPath, settings.RoomEventsPath),
             FfmpegPath = string.IsNullOrWhiteSpace(Read("CELESTE_REPLAY_FFMPEG_PATH")) ? settings.FfmpegPath : Path.GetFullPath(Read("CELESTE_REPLAY_FFMPEG_PATH")!),
-            PollIntervalMs = ReadLong("CELESTE_REPLAY_POLL_MS") ?? settings.PollIntervalMs,
+            PollIntervalMs = Math.Max(1000, ReadLong("CELESTE_REPLAY_POLL_MS") ?? settings.PollIntervalMs),
             PreRollMs = ReadLong("CELESTE_REPLAY_PRE_ROLL_MS") ?? settings.PreRollMs,
             PostRollMs = ReadLong("CELESTE_REPLAY_POST_ROLL_MS") ?? settings.PostRollMs,
             MaxAnchorGapMs = ReadLong("CELESTE_REPLAY_MAX_ANCHOR_GAP_MS") ?? settings.MaxAnchorGapMs,
@@ -358,35 +358,13 @@ public sealed class PanelStateStore
         return template.Replace("{recording_start_local}", baseName, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string ResolveMapOutputDirectory(string baseOutputDirectory, string? mapSid)
-    {
-        var mapFolderName = GetMapFolderName(mapSid);
-        return Path.Combine(baseOutputDirectory, mapFolderName);
-    }
-
-    private static string GetMapFolderName(string? mapSid)
-    {
-        if (string.IsNullOrWhiteSpace(mapSid))
-        {
-            return "UnknownMap";
-        }
-
-        var normalized = mapSid.Trim().Replace('\\', '/');
-        var leaf = normalized
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .LastOrDefault();
-
-        if (string.IsNullOrWhiteSpace(leaf))
-        {
-            leaf = normalized;
-        }
-
-        var sanitized = SanitizeFileName(leaf).Trim().TrimEnd('.');
-        return string.IsNullOrWhiteSpace(sanitized) ? "UnknownMap" : sanitized;
-    }
-
     private static string GetRecordingStartBaseName(string? recordingOutputPath, DateTimeOffset? recordingStartUtc)
     {
+        if (recordingStartUtc.HasValue)
+        {
+            return recordingStartUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH-mm-ss");
+        }
+
         if (!string.IsNullOrWhiteSpace(recordingOutputPath))
         {
             var stem = Path.GetFileNameWithoutExtension(recordingOutputPath.Trim());
@@ -394,11 +372,6 @@ public sealed class PanelStateStore
             {
                 return SanitizeFileName(stem);
             }
-        }
-
-        if (recordingStartUtc.HasValue)
-        {
-            return recordingStartUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH-mm-ss");
         }
 
         return DateTimeOffset.Now.ToString("yyyy-MM-dd HH-mm-ss");

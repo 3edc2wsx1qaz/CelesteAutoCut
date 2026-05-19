@@ -182,10 +182,12 @@ internal sealed class ObsAutoAssemblerLauncher {
 
     private static void Log(string message, LogLevel level = LogLevel.Info) {
         Logger.Log(level, Tag, message);
-        try {
-            Engine.Commands?.Log($"[{Tag}] {message}");
-        } catch {
-            // Engine.Commands is not always safe during early module startup.
+        if (level >= LogLevel.Warn) {
+            try {
+                Engine.Commands?.Log($"[{Tag}] {message}");
+            } catch {
+                // Engine.Commands is not always safe during early module startup.
+            }
         }
     }
 }
