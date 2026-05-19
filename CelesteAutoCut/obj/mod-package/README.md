@@ -8,7 +8,7 @@ CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** �
 2. 在 OBS 中开始录制（推荐 `.mkv`）。
 3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
 
-当前版本重点修复：房间切换处不再重复保留同一段转场画面；最终成片默认直接放在 OBS 录制目录；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
+当前版本重点修复：首房间不会再被初始 `load_level` 截掉，房间切换处不再重复保留同一段转场画面；最终成片默认放在 OBS 录制目录下的地图名子文件夹；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
 
 ---
 
@@ -56,7 +56,14 @@ yyyy-MM-dd HH-mm-ss.mp4
 2. OBS 当前配置的默认录制目录；
 3. helper 工作目录（兜底）。
 
-为了避免 mod 地图产物被藏进难找的子目录，当前版本 **不再按地图 SID 自动创建地图子文件夹**。正常情况下，最终视频会直接出现在 OBS 录制目录里。
+最终视频会写入上述目录下的 **地图名子文件夹**，文件夹名取地图 SID 的最后一段，并清理为合法文件名。例如：
+
+```text
+E:\obs_video\1-ForsakenCity\2026-05-19 20-31-08.mp4
+E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
+```
+
+如果手动把最终文件名配置成绝对路径，helper 会尊重该绝对路径，不再额外套地图名子文件夹。
 
 ---
 
@@ -119,7 +126,7 @@ helper 工作目录：
 CelesteAutoCut 不会读写或删除 Celeste 存档文件。代码只会写入：
 
 - `<Celeste>/CelesteAutoCutReplays/` 下的事件、session、临时拼接文件；
-- OBS 录制目录中的最终视频；
+- OBS 录制目录下地图名子文件夹中的最终视频；
 - `<Celeste>/CelesteAutoCutTools/` 下的 helper 文件。
 
 如果某张 mod 地图的存档看起来消失，建议先确认 Everest 是否加载了同一套 mod、同一存档槽，以及 `Mods` 目录里是否只有一个活动的 `CelesteAutoCut*.zip`。
@@ -135,7 +142,8 @@ CelesteAutoCut 不会读写或删除 Celeste 存档文件。代码只会写入�
 - OBS 是否真的开始录制；
 - OBS websocket 是否启用并连接；
 - `<Celeste>/CelesteAutoCutReplays/obs_auto/sessions/<session-id>/` 是否生成；
-- `assembly/assembly_report.json` 中的 `finalOutputPath`。
+- `assembly/assembly_report.json` 中的 `finalOutputPath`；
+- OBS 录制目录下是否生成了对应地图名子文件夹。
 
 ### 2. 游戏里还是旧行为
 
@@ -193,4 +201,4 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 .\Scripts\real-zip-only-test.ps1
 ```
 
-脚本会先进入 1A 建立房间事件 session，再启动 OBS 录制并播放 1A TAS；如果 1A TAS 复用了进入录制前已经存在的同一房间 session，验证会复用该 session，而不是误判为“录制后没有新的 room event”。
+脚本会先进入 1A 建立房间事件 session，再启动 OBS 录制并播放 1A TAS；如果 1A TAS 复用了进入录制前已经存在的同一房间 session，验证会复用该 session，而不是误判为“录制后没有新的 room event”。验证同时检查最终视频位于地图名子文件夹，且文件名仍为录制开始本地时间。

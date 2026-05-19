@@ -15,8 +15,8 @@ public static class SelfTests
             ("adjacent rooms trim overlapping transition footage", AdjacentRoomOverlapTrim),
             ("adjacent rooms cut exactly at transition boundary", AdjacentRoomTransitionBoundaryTrim),
             ("checkpoint lobby entered before recording still yields clip", CheckpointLobbyEnteredBeforeRecording),
-            ("load level becomes attempt reset after death", LoadLevelResetsAttempt),
-            ("first room keeps room-entry intro before clear", FirstRoomKeepsIntroBeforeClear),
+            ("load level becomes attempt reset after failure", LoadLevelResetsAttemptAfterFailure),
+            ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
@@ -179,14 +179,14 @@ public static class SelfTests
         Assert(doc.Clips[0].Reasons.Contains("start_clamped_to_recording_start"), "clip should explain the recording-start clamp");
     }
 
-    private static void LoadLevelResetsAttempt()
+    private static void LoadLevelResetsAttemptAfterFailure()
     {
         var start = BaseUtc.AddSeconds(2);
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
             new() { EventType = "death", Utc = start.AddMilliseconds(750), Room = "a", MapSid = "map" },
-            new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
             new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
         };
         var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
@@ -200,7 +200,7 @@ public static class SelfTests
         Assert(successfulAttempt.StartUtc == start.AddSeconds(1), "attempt should restart from load_level, not death");
     }
 
-    private static void FirstRoomKeepsIntroBeforeClear()
+    private static void FirstRoomTransitionLoadLevelDoesNotCutOffIntro()
     {
         var start = BaseUtc.AddSeconds(2);
         var introLoad = start.AddMilliseconds(400);
@@ -219,11 +219,10 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
-        Assert(doc.Clips.Count == 2, "expected intro clip plus clear clip for first room");
-        Assert(doc.Clips[0].Reasons.Contains("room_entry_intro_first_room"), "first clip should be first-room intro");
-        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == introLoad, "first-room intro boundaries mismatch");
-        Assert(doc.Clips[1].Reasons.Contains("final_successful_attempt"), "second clip should be the successful attempt");
-        Assert(doc.Clips[1].StartUtc == introLoad && doc.Clips[1].EndUtc == clear, "successful attempt should start at first load_level");
+        Assert(doc.Clips.Count == 1, "first room should produce one non-overlapping valid clip");
+        Assert(doc.Clips[0].Reasons.Contains("final_successful_attempt"), "first room should be kept as the successful attempt");
+        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == clear, "initial transition load_level must not cut off first-room intro");
+        Assert(doc.InvalidClips.Count == 0, "first room should not create an overlapping intro candidate");
     }
 
     private static void DeathRoomKeepsIntroBeforeClear()

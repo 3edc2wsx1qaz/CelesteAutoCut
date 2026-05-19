@@ -56,7 +56,7 @@ public sealed class PanelStateStore
         var preferredOutputDirectory = ResolvePreferredOutputDirectory(recordingOutputPath);
         var resolvedPath = Path.IsPathRooted(fileNameOrPath)
             ? Path.GetFullPath(fileNameOrPath)
-            : Path.Combine(preferredOutputDirectory, fileNameOrPath);
+            : Path.Combine(ResolveMapOutputDirectory(preferredOutputDirectory, mapSid), fileNameOrPath);
 
         if (!string.IsNullOrWhiteSpace(recordingOutputPath) &&
             string.Equals(Path.GetFullPath(recordingOutputPath), resolvedPath, StringComparison.OrdinalIgnoreCase))
@@ -356,6 +356,23 @@ public sealed class PanelStateStore
         var template = NormalizeConfiguredFinalOutputName(finalOutputName);
         var baseName = GetRecordingStartBaseName(recordingOutputPath, recordingStartUtc);
         return template.Replace("{recording_start_local}", baseName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveMapOutputDirectory(string preferredOutputDirectory, string? mapSid)
+        => Path.Combine(preferredOutputDirectory, GetMapFolderName(mapSid));
+
+    private static string GetMapFolderName(string? mapSid)
+    {
+        if (string.IsNullOrWhiteSpace(mapSid))
+        {
+            return "UnknownMap";
+        }
+
+        var normalized = mapSid.Trim().Replace('\\', '/');
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var leaf = segments.Length > 0 ? segments[^1] : normalized;
+        var sanitized = SanitizeFileName(leaf).Trim().TrimEnd('.');
+        return string.IsNullOrWhiteSpace(sanitized) ? "UnknownMap" : sanitized;
     }
 
     private static string GetRecordingStartBaseName(string? recordingOutputPath, DateTimeOffset? recordingStartUtc)

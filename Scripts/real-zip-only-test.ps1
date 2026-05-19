@@ -979,7 +979,15 @@ try {
     } else {
         Split-Path -Parent $sessionFinalOutputPathHint
     }
-    $expectedOutputDir = $expectedOutputDirRoot
+    $primaryMapSid = $clipDoc.clips | ForEach-Object { $_.mapSid } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1
+    if (-not $primaryMapSid) {
+        $primaryMapSid = $clipDoc.invalidClips | ForEach-Object { $_.mapSid } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1
+    }
+    $expectedOutputDir = if ($expectedOutputDirRoot) {
+        Join-Path $expectedOutputDirRoot (Get-MapFolderName ([string]$primaryMapSid))
+    } else {
+        $null
+    }
     $expectedFinalOutputPath = if ($expectedOutputDir -and $expectedFinalOutputFileName) {
         Join-Path $expectedOutputDir $expectedFinalOutputFileName
     } else {

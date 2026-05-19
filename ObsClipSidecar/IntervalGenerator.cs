@@ -158,6 +158,7 @@ public sealed class IntervalGenerator
         var result = new List<ClipCandidate>();
         RoomEvent? currentRoomStart = null;
         RoomEvent? attemptStart = null;
+        var attemptFailed = false;
         var index = 0;
 
         foreach (var e in events)
@@ -166,6 +167,7 @@ public sealed class IntervalGenerator
             {
                 currentRoomStart = e;
                 attemptStart = e;
+                attemptFailed = false;
                 continue;
             }
 
@@ -178,6 +180,7 @@ public sealed class IntervalGenerator
 
                 currentRoomStart = e with { EventType = "room_start", Room = e.NextRoom ?? e.Room };
                 attemptStart = currentRoomStart;
+                attemptFailed = false;
                 continue;
             }
 
@@ -205,7 +208,20 @@ public sealed class IntervalGenerator
 
             if (e.EventType is "death" or "respawn" or "load_end" or "load_level")
             {
-                attemptStart = e;
+                if (e.EventType is "death" or "respawn" or "load_end")
+                {
+                    attemptFailed = true;
+                }
+
+                if (e.EventType is not "load_level" || attemptFailed || IsRespawnLoadLevel(e))
+                {
+                    attemptStart = e;
+                }
+
+                if (e.EventType is "load_level")
+                {
+                    attemptFailed = false;
+                }
             }
         }
 
@@ -217,14 +233,12 @@ public sealed class IntervalGenerator
         var result = new List<ClipCandidate>();
         RoomLifecycle? current = null;
         var index = 0;
-        var nextRoomIsFirstRoom = true;
 
         foreach (var e in events)
         {
             if (e.EventType is "room_enter")
             {
-                current = new RoomLifecycle(e, nextRoomIsFirstRoom);
-                nextRoomIsFirstRoom = false;
+                current = new RoomLifecycle(e);
                 continue;
             }
 
@@ -249,19 +263,12 @@ public sealed class IntervalGenerator
             {
                 if (current.InitialCheckpoint is not null &&
                     SameRoom(current.Entry, e) &&
-                    (current.HadDeath || current.IsFirstRoom))
+                    current.HadDeath)
                 {
-                    var reason = current.IsFirstRoom
-                        ? "room_entry_intro_first_room"
-                        : "room_entry_intro_before_clear";
-                    result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, reason, true));
+                    result.Add(new ClipCandidate(index++, current.Entry, current.InitialCheckpoint, current.Entry.Room ?? e.Room ?? "room", current.Entry.MapSid ?? e.MapSid, "room_entry_intro_before_clear", true));
                 }
 
                 current = null;
-                if (e.EventType is "level_complete")
-                {
-                    nextRoomIsFirstRoom = true;
-                }
                 continue;
             }
 
@@ -273,7 +280,6 @@ public sealed class IntervalGenerator
                 }
 
                 current = null;
-                nextRoomIsFirstRoom = true;
             }
         }
 
@@ -550,6 +556,9 @@ public sealed class IntervalGenerator
         return !string.Equals(playerIntro, "Respawn", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsRespawnLoadLevel(RoomEvent loadLevel)
+        => string.Equals(GetNoteString(loadLevel, "playerIntro"), "Respawn", StringComparison.OrdinalIgnoreCase);
+
     private static bool SameRoom(RoomEvent left, RoomEvent right)
         => string.Equals(left.Room ?? string.Empty, right.Room ?? string.Empty, StringComparison.Ordinal);
 
@@ -592,14 +601,12 @@ public sealed class IntervalGenerator
 
     private sealed class RoomLifecycle
     {
-        public RoomLifecycle(RoomEvent entry, bool isFirstRoom)
+        public RoomLifecycle(RoomEvent entry)
         {
             Entry = entry;
-            IsFirstRoom = isFirstRoom;
         }
 
         public RoomEvent Entry { get; }
-        public bool IsFirstRoom { get; }
         public RoomEvent? InitialCheckpoint { get; set; }
         public bool HadDeath { get; set; }
     }
