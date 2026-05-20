@@ -36,10 +36,23 @@ public sealed class IntervalGenerator
 
         foreach (var candidate in candidates)
         {
-            var startEstimate = EstimateBoundary(candidate.Start.Utc, manifest, options.MaxAllowedAnchorGapMs);
-            var endEstimate = EstimateBoundary(candidate.End.Utc, manifest, options.MaxAllowedAnchorGapMs);
+            var timedCandidate = candidate;
+            var usesDynamicRoomEntryEnd = false;
+            if (IsStandaloneRoomEntryLoad(candidate) &&
+                TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var dynamicEnd))
+            {
+                timedCandidate = candidate with { End = dynamicEnd };
+                usesDynamicRoomEntryEnd = true;
+            }
+
+            var startEstimate = EstimateBoundary(timedCandidate.Start.Utc, manifest, options.MaxAllowedAnchorGapMs);
+            var endEstimate = EstimateBoundary(timedCandidate.End.Utc, manifest, options.MaxAllowedAnchorGapMs);
             var baseReasons = new List<string>();
             var annotations = new List<string>();
+            if (usesDynamicRoomEntryEnd)
+            {
+                annotations.Add("room_entry_load_player_position_end");
+            }
 
             if (!startEstimate.IsValid)
             {
@@ -71,9 +84,9 @@ public sealed class IntervalGenerator
                 continue;
             }
 
-            var preRollMs = candidate.IsCheckpointIntro || StartsAtRespawnLoadLevel(candidate) ? 0 : options.PreRollMs;
-            var addsRoomEntryLoadDelay = IsStandaloneRoomEntryLoad(candidate);
-            var postRollMs = candidate.IsCheckpointIntro && !addsRoomEntryLoadDelay ? 0 : options.PostRollMs;
+            var preRollMs = timedCandidate.IsCheckpointIntro || StartsAtRespawnLoadLevel(timedCandidate) ? 0 : options.PreRollMs;
+            var addsRoomEntryLoadDelay = IsStandaloneRoomEntryLoad(timedCandidate) && !usesDynamicRoomEntryEnd;
+            var postRollMs = timedCandidate.IsCheckpointIntro && !addsRoomEntryLoadDelay ? 0 : options.PostRollMs;
             var startMs = Math.Max(0, startEstimate.EstimatedOutputDurationMs - preRollMs);
             var endMs = endEstimate.EstimatedOutputDurationMs + postRollMs;
             var recordingEndMs = recording.Files.Count == 0 ? long.MaxValue : recording.Files.Max(f => f.EndDurationMs);
@@ -82,7 +95,7 @@ public sealed class IntervalGenerator
                 endMs = recordingEndMs;
                 annotations.Add("end_postroll_clamped_to_recording_end");
             }
-            var preparedClip = new PreparedClip(candidate, startEstimate, endEstimate, recording, startMs, endMs, baseReasons);
+            var preparedClip = new PreparedClip(timedCandidate, startEstimate, endEstimate, recording, startMs, endMs, baseReasons);
             preparedClip.Annotations.AddRange(annotations);
             if (addsRoomEntryLoadDelay && postRollMs > 0)
             {
@@ -203,7 +216,7 @@ public sealed class IntervalGenerator
             }
             else if (!IsRoomEntry(e))
             {
-                if (IsExitLike(e) || IsSessionEnd(e))
+                if (IsExitLike(e) || IsSessionEnd(e) || IsPlayerPositionSample(e))
                 {
                     i++;
                     continue;
@@ -220,6 +233,12 @@ public sealed class IntervalGenerator
                 {
                     i++;
                     break;
+                }
+
+                if (IsPlayerPositionSample(events[i]))
+                {
+                    i++;
+                    continue;
                 }
 
                 if (!IsRoomEntry(events[i]))
@@ -259,6 +278,12 @@ public sealed class IntervalGenerator
                 while (i < events.Count)
                 {
                     var current = events[i];
+                    if (IsPlayerPositionSample(current))
+                    {
+                        i++;
+                        continue;
+                    }
+
                     if (IsSessionStart(current))
                     {
                         FlushPendingCheckpointDeathWarning();
@@ -505,6 +530,12 @@ public sealed class IntervalGenerator
                 continue;
             }
 
+            if (IsPlayerPositionSample(current))
+            {
+                i++;
+                continue;
+            }
+
             if (IsSessionStart(current) || IsSessionEnd(current) || IsExitLike(current) || IsRoomEntry(current))
             {
                 warnings.Add(DiscardWarning("linear_discard_missing_load_level_after_room_enter", roomEnter));
@@ -532,6 +563,12 @@ public sealed class IntervalGenerator
         while (i < events.Count)
         {
             var current = events[i];
+            if (IsPlayerPositionSample(current))
+            {
+                i++;
+                continue;
+            }
+
             if (IsRoomEntry(current))
             {
                 AddCandidate(result, ref index, transition, current, current.Room ?? transition.NextRoom ?? transition.Room ?? "room", current.MapSid ?? transition.MapSid, "transition_to_room_enter", true);
@@ -569,6 +606,12 @@ public sealed class IntervalGenerator
         while (i < events.Count)
         {
             var current = events[i];
+            if (IsPlayerPositionSample(current))
+            {
+                i++;
+                continue;
+            }
+
             if (IsRoomEntry(current))
             {
                 AddCandidate(result, ref index, strawberry, current, current.Room ?? strawberry.Room ?? "room", current.MapSid ?? strawberry.MapSid, "strawberry_collect_to_room_enter", true);
@@ -606,6 +649,12 @@ public sealed class IntervalGenerator
         while (i < events.Count)
         {
             var current = events[i];
+            if (IsPlayerPositionSample(current))
+            {
+                i++;
+                continue;
+            }
+
             if (IsExitLike(current))
             {
                 AddCandidate(result, ref index, levelComplete, current, levelComplete.Room ?? current.Room ?? "room", levelComplete.MapSid ?? current.MapSid, "level_complete_to_exit", true);
@@ -941,6 +990,87 @@ public sealed class IntervalGenerator
     private static bool IsStandaloneRoomEntryLoad(ClipCandidate candidate)
         => string.Equals(candidate.BaseValidReason, "room_entry_load", StringComparison.Ordinal);
 
+    private static bool TryFindRoomEntryLoadPlayerPositionEnd(ClipCandidate candidate, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicEnd)
+    {
+        dynamicEnd = candidate.End;
+        if (!TryGetSpawnPoint(candidate.End, out var spawnPoint))
+        {
+            return false;
+        }
+
+        var loadIndex = -1;
+        for (var i = 0; i < events.Count; i++)
+        {
+            if (ReferenceEquals(events[i], candidate.End))
+            {
+                loadIndex = i;
+                break;
+            }
+        }
+
+        if (loadIndex < 0)
+        {
+            return false;
+        }
+
+        RoomEvent? best = null;
+        var bestDistanceSquared = double.MaxValue;
+        for (var i = loadIndex + 1; i < events.Count; i++)
+        {
+            var current = events[i];
+            if (IsPlayerPositionSample(current))
+            {
+                if (!SameMapAndRoom(candidate.End, current) ||
+                    !SampleBelongsToLoad(current, candidate.End) ||
+                    !TryGetPlayerPosition(current, out var position))
+                {
+                    continue;
+                }
+
+                var distanceSquared = DistanceSquared(spawnPoint, position);
+                if (distanceSquared < bestDistanceSquared)
+                {
+                    best = current;
+                    bestDistanceSquared = distanceSquared;
+                }
+
+                continue;
+            }
+
+            if (IsPostLoadSemanticBoundary(current))
+            {
+                break;
+            }
+        }
+
+        if (best is null)
+        {
+            return false;
+        }
+
+        dynamicEnd = best;
+        return true;
+    }
+
+    private static bool SampleBelongsToLoad(RoomEvent sample, RoomEvent loadLevel)
+    {
+        var sampleLoadEventId = GetNoteString(sample, "loadEventId");
+        return string.IsNullOrWhiteSpace(sampleLoadEventId) ||
+               string.Equals(sampleLoadEventId, loadLevel.EventId, StringComparison.Ordinal);
+    }
+
+    private static bool IsPostLoadSemanticBoundary(RoomEvent e)
+        => e.EventType is "session_start" or "session_end" or "room_enter" or "room_start" or
+           "load_level" or "death" or "load_end" or "transition" or "level_complete" or
+           "exit" or "on_exit" or "strawberry_collect" or "berry_collect";
+
+    private static double DistanceSquared(RespawnPoint left, RespawnPoint right)
+    {
+        var dx = left.X - right.X;
+        var dy = left.Y - right.Y;
+        return (dx * dx) + (dy * dy);
+    }
+
     private static BoundaryEstimate EstimateBoundary(DateTimeOffset utc, SessionManifest manifest, long maxAllowedAnchorGapMs)
     {
         var reasons = new List<string>();
@@ -1160,15 +1290,25 @@ public sealed class IntervalGenerator
            TryGetRespawnPoint(nextLoad, out var next) &&
            !SameRespawnPoint(previous, next);
 
+    private static bool TryGetSpawnPoint(RoomEvent loadLevel, out RespawnPoint point)
+        => TryGetPoint(loadLevel, "spawnPointX", "spawnPointY", out point) ||
+           TryGetRespawnPoint(loadLevel, out point);
+
     private static bool SameRespawnPoint(RespawnPoint left, RespawnPoint right)
         => Math.Abs(left.X - right.X) < 0.001 &&
            Math.Abs(left.Y - right.Y) < 0.001;
 
     private static bool TryGetRespawnPoint(RoomEvent loadLevel, out RespawnPoint point)
+        => TryGetPoint(loadLevel, "respawnPointX", "respawnPointY", out point);
+
+    private static bool TryGetPlayerPosition(RoomEvent sample, out RespawnPoint point)
+        => TryGetPoint(sample, "x", "y", out point);
+
+    private static bool TryGetPoint(RoomEvent e, string xKey, string yKey, out RespawnPoint point)
     {
         point = default;
-        if (!TryGetNoteDouble(loadLevel, "respawnPointX", out var x) ||
-            !TryGetNoteDouble(loadLevel, "respawnPointY", out var y))
+        if (!TryGetNoteDouble(e, xKey, out var x) ||
+            !TryGetNoteDouble(e, yKey, out var y))
         {
             return false;
         }
@@ -1180,6 +1320,9 @@ public sealed class IntervalGenerator
     private static bool IsStrawberryCollect(RoomEvent e)
         => string.Equals(e.EventType, "strawberry_collect", StringComparison.Ordinal) ||
            string.Equals(e.EventType, "berry_collect", StringComparison.Ordinal);
+
+    private static bool IsPlayerPositionSample(RoomEvent e)
+        => string.Equals(e.EventType, "player_position_sample", StringComparison.Ordinal);
 
     private static void AddIntroCandidate(
         List<ClipCandidate> result,

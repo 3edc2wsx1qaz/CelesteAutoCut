@@ -4,12 +4,15 @@ using System.IO;
 using System.Text.Json;
 using Celeste;
 using Celeste.Mod;
+using Microsoft.Xna.Framework;
 using Monocle;
 
 namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
-    private const long StatusWriteIntervalFrames = 15;
+    private const long StatusWriteIntervalFrames = 60;
+    private const long PlayerPositionSampleIntervalFrames = 10;
+    private const long PlayerPositionSampleWindowFrames = 480;
     private const string EventLogFileName = "room_events.jsonl";
     private const string StatusFileName = "room_clip_session.json";
     private readonly ReplayController replayController;
@@ -36,6 +39,11 @@ internal sealed class RoomClipRecorder {
     private string? chapter;
     private long gameFrame;
     private long lastStatusWriteFrame = long.MinValue;
+    private string? playerPositionSampleLoadEventId;
+    private string? playerPositionSampleRoom;
+    private Vector2? playerPositionSampleSpawnPoint;
+    private long playerPositionSampleUntilFrame = long.MinValue;
+    private long lastPlayerPositionSampleFrame = long.MinValue;
 
     public RoomClipRecorder(ReplayController replayController) {
         this.replayController = replayController;
@@ -80,9 +88,10 @@ internal sealed class RoomClipRecorder {
         }
     }
 
-    public void TickFrame() {
+    public void TickFrame(Level? level = null) {
         if (active) {
             gameFrame++;
+            ObservePlayerPositionSample(level);
             WriteStatus();
         }
     }
@@ -110,9 +119,9 @@ internal sealed class RoomClipRecorder {
                 ["reason"] = "transition",
                 ["source"] = "observed_state"
             });
-            WriteLoadLevel(session, observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
+            WriteLoadLevel(level, session, observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
         } else if (pendingInitialLoadLevel) {
-            WriteLoadLevel(session, observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
+            WriteLoadLevel(level, session, observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
         }
 
         if (chapterComplete && !chapterCompleteLogged) {
@@ -134,6 +143,7 @@ internal sealed class RoomClipRecorder {
             ["mode"] = reason,
             ["source"] = "observed_state"
         });
+        ClearPlayerPositionSampling();
         Stop(reason, discard: false);
         ResetObservedState();
     }
@@ -147,6 +157,7 @@ internal sealed class RoomClipRecorder {
             ["x"] = player.Position.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["y"] = player.Position.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
         });
+        ClearPlayerPositionSampling();
         attemptId = Guid.NewGuid().ToString("N");
     }
 
@@ -165,7 +176,7 @@ internal sealed class RoomClipRecorder {
         lastObservedRoom = observedRoom;
         observedSession = session;
         pendingInitialLoadLevel = false;
-        WriteLoadLevel(session, observedRoom, playerIntro, isFromLoader, source: "level_load_hook");
+        WriteLoadLevel(level, session, observedRoom, playerIntro, isFromLoader, source: "level_load_hook");
     }
 
     public void OnStrawberryCollect(Strawberry strawberry) {
@@ -213,6 +224,7 @@ internal sealed class RoomClipRecorder {
         gameFrame = 0;
         statusDirty = false;
         lastStatusWriteFrame = long.MinValue;
+        ClearPlayerPositionSampling();
         ResetObservedState();
     }
 
@@ -241,19 +253,23 @@ internal sealed class RoomClipRecorder {
         }
 
         active = false;
+        ClearPlayerPositionSampling();
         statusDirty = true;
         WriteStatus(force: true);
     }
 
-    private void WriteLoadLevel(Session session, string room, string playerIntro, bool isFromLoader, string source) {
+    private void WriteLoadLevel(Level level, Session session, string room, string playerIntro, bool isFromLoader, string source) {
         pendingInitialLoadLevel = false;
+        var spawnPoint = ResolveSpawnPoint(level, session);
         var notes = new Dictionary<string, string?> {
             ["playerIntro"] = playerIntro,
             ["isFromLoader"] = isFromLoader.ToString(),
             ["source"] = source
         };
         AddRespawnPointNotes(notes, session);
-        WriteEvent(RoomClipEventTypes.LoadLevel, room, notes: notes);
+        AddSpawnPointNotes(notes, spawnPoint);
+        var loadEvent = WriteEvent(RoomClipEventTypes.LoadLevel, room, notes: notes);
+        SchedulePlayerPositionSampling(loadEvent, room, spawnPoint);
     }
 
     private static void AddRespawnPointNotes(Dictionary<string, string?> notes, Session session) {
@@ -267,7 +283,95 @@ internal sealed class RoomClipRecorder {
         notes["respawnPointY"] = respawnPoint.Value.Y.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private void WriteEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null) {
+    private static void AddSpawnPointNotes(Dictionary<string, string?> notes, Vector2? spawnPoint) {
+        notes["hasSpawnPoint"] = spawnPoint.HasValue.ToString();
+        if (!spawnPoint.HasValue) {
+            return;
+        }
+
+        notes["spawnPointX"] = spawnPoint.Value.X.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        notes["spawnPointY"] = spawnPoint.Value.Y.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static Vector2? ResolveSpawnPoint(Level level, Session session) {
+        if (session.RespawnPoint.HasValue) {
+            return session.RespawnPoint.Value;
+        }
+
+        try {
+            return session.GetSpawnPoint(new Vector2(level.Bounds.Left, level.Bounds.Bottom));
+        } catch {
+            // best effort only
+        }
+
+        return null;
+    }
+
+    private void SchedulePlayerPositionSampling(RoomClipEvent loadEvent, string room, Vector2? spawnPoint) {
+        if (!spawnPoint.HasValue) {
+            ClearPlayerPositionSampling();
+            return;
+        }
+
+        playerPositionSampleLoadEventId = loadEvent.EventId;
+        playerPositionSampleRoom = room;
+        playerPositionSampleSpawnPoint = spawnPoint;
+        playerPositionSampleUntilFrame = gameFrame + PlayerPositionSampleWindowFrames;
+        lastPlayerPositionSampleFrame = long.MinValue;
+    }
+
+    private void ObservePlayerPositionSample(Level? level) {
+        if (level is null ||
+            string.IsNullOrWhiteSpace(playerPositionSampleLoadEventId) ||
+            !playerPositionSampleSpawnPoint.HasValue) {
+            return;
+        }
+
+        if (gameFrame > playerPositionSampleUntilFrame) {
+            ClearPlayerPositionSampling();
+            return;
+        }
+
+        if (lastPlayerPositionSampleFrame != long.MinValue &&
+            (gameFrame - lastPlayerPositionSampleFrame) < PlayerPositionSampleIntervalFrames) {
+            return;
+        }
+
+        var session = level.Session;
+        var room = session.Level ?? string.Empty;
+        if (!string.Equals(room, playerPositionSampleRoom ?? string.Empty, StringComparison.Ordinal)) {
+            ClearPlayerPositionSampling();
+            return;
+        }
+
+        var player = level.Tracker.GetEntity<Player>();
+        if (player is null) {
+            return;
+        }
+
+        var spawnPoint = playerPositionSampleSpawnPoint.Value;
+        lastPlayerPositionSampleFrame = gameFrame;
+        WriteEvent(RoomClipEventTypes.PlayerPositionSample, room, notes: new Dictionary<string, string?> {
+            ["loadEventId"] = playerPositionSampleLoadEventId,
+            ["x"] = player.Position.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["y"] = player.Position.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["spawnPointX"] = spawnPoint.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["spawnPointY"] = spawnPoint.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sampleIntervalFrames"] = PlayerPositionSampleIntervalFrames.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sampleWindowFrames"] = PlayerPositionSampleWindowFrames.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["source"] = "post_load_player_position_sample"
+        }, updateStatus: false);
+    }
+
+    private void ClearPlayerPositionSampling() {
+        playerPositionSampleLoadEventId = null;
+        playerPositionSampleRoom = null;
+        playerPositionSampleSpawnPoint = null;
+        playerPositionSampleUntilFrame = long.MinValue;
+        lastPlayerPositionSampleFrame = long.MinValue;
+    }
+
+    private RoomClipEvent WriteEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null, bool updateStatus = true) {
         Directory.CreateDirectory(replayController.ReplayDirectory);
         var entry = new RoomClipEvent {
             EventType = eventType,
@@ -285,8 +389,12 @@ internal sealed class RoomClipRecorder {
         };
 
         File.AppendAllText(EventLogPath, JsonSerializer.Serialize(entry, jsonOptions) + Environment.NewLine);
-        statusDirty = true;
-        WriteStatus(force: true);
+        if (updateStatus) {
+            statusDirty = true;
+            WriteStatus(force: true);
+        }
+
+        return entry;
     }
 
     private void WriteStatus(bool force = false) {

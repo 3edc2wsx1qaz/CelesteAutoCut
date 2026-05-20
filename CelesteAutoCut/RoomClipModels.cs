@@ -42,6 +42,7 @@ internal static class RoomClipEventTypes {
     public const string Transition = "transition";
     public const string Death = "death";
     public const string StrawberryCollect = "strawberry_collect";
+    public const string PlayerPositionSample = "player_position_sample";
     public const string LevelComplete = "level_complete";
     public const string Exit = "exit";
     public const string SessionEnd = "session_end";

@@ -21,6 +21,7 @@ public static class SelfTests
             ("changed respawn point keeps checkpoint death route", ChangedRespawnPointKeepsCheckpointDeathRoute),
             ("same respawn point does not keep death route", SameRespawnPointDoesNotKeepDeathRoute),
             ("respawn attempt with another death is discarded", RespawnAttemptWithAnotherDeathIsDiscarded),
+            ("room entry load ends at closest spawn sample", RoomEntryLoadEndsAtClosestSpawnSample),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
@@ -361,6 +362,37 @@ public static class SelfTests
 
         Assert(!doc.Clips.Any(c => c.StartUtc == firstRespawnLoad && c.EndUtc == transition), "failed respawn attempt must not be kept through the later transition");
         Assert(HasClipCovering(doc, secondRespawnLoad, transition), "later death-free respawn attempt should be kept");
+    }
+
+    private static void RoomEntryLoadEndsAtClosestSpawnSample()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var closestSample = start.AddMilliseconds(420);
+        var respawnLoad = start.AddSeconds(1);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = start.AddMilliseconds(300), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 130, 100) },
+            new() { EventType = "player_position_sample", Utc = closestSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 101, 100) },
+            new() { EventType = "player_position_sample", Utc = start.AddMilliseconds(540), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 150, 100) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 500,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_player_position_end"));
+        Assert(entryLoad.EndUtc == closestSample, "room entry load should end at the player sample closest to the spawn point");
+        Assert(entryLoad.EndOutputDurationMs == 2_420, "dynamic room entry load end must not add fixed postroll");
+        Assert(!doc.Warnings.Any(w => w.Contains("player_position_sample", StringComparison.Ordinal)), "player position samples should not create discard warnings");
     }
 
     private static void StandaloneRoomEntryLoadGetsDelay()
@@ -979,6 +1011,21 @@ public static class SelfTests
         ["hasRespawnPoint"] = "True",
         ["respawnPointX"] = x.ToString(System.Globalization.CultureInfo.InvariantCulture),
         ["respawnPointY"] = y.ToString(System.Globalization.CultureInfo.InvariantCulture)
+    };
+
+    private static Dictionary<string, object?> SpawnNotes(string playerIntro, double x, double y) => new()
+    {
+        ["playerIntro"] = playerIntro,
+        ["hasSpawnPoint"] = "True",
+        ["spawnPointX"] = x.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ["spawnPointY"] = y.ToString(System.Globalization.CultureInfo.InvariantCulture)
+    };
+
+    private static Dictionary<string, object?> PlayerSampleNotes(string loadEventId, double x, double y) => new()
+    {
+        ["loadEventId"] = loadEventId,
+        ["x"] = x.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ["y"] = y.ToString(System.Globalization.CultureInfo.InvariantCulture)
     };
 
     private static RecordingManifest Recording(string id, DateTimeOffset startUtc, string path, long startMs, long endMs) =>

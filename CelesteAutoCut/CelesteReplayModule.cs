@@ -85,7 +85,7 @@ public sealed class CelesteAutoCutModule : EverestModule {
         bool chapterComplete = RuntimeLevelState.IsChapterComplete(self);
         roomClipRecorder.ObserveLevel(self, chapterComplete);
         observedLevelSceneLastFrame = true;
-        roomClipRecorder.TickFrame();
+        roomClipRecorder.TickFrame(self);
     }
 
     private void ObserveSceneExit() {
