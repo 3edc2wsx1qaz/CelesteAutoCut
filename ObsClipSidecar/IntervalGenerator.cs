@@ -38,11 +38,20 @@ public sealed class IntervalGenerator
         {
             var timedCandidate = candidate;
             var usesDynamicRoomEntryEnd = false;
+            var usesDynamicLoadLevelStart = false;
             if (IsStandaloneRoomEntryLoad(candidate) &&
                 TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var dynamicEnd))
             {
                 timedCandidate = candidate with { End = dynamicEnd };
                 usesDynamicRoomEntryEnd = true;
+            }
+
+            if (!candidate.IsCheckpointIntro &&
+                IsLoadLevelStart(timedCandidate) &&
+                TryFindLoadLevelPlayerPositionStart(timedCandidate.Start, sortedEvents, out var dynamicStart))
+            {
+                timedCandidate = timedCandidate with { Start = dynamicStart };
+                usesDynamicLoadLevelStart = true;
             }
 
             var startEstimate = EstimateBoundary(timedCandidate.Start.Utc, manifest, options.MaxAllowedAnchorGapMs);
@@ -52,6 +61,10 @@ public sealed class IntervalGenerator
             if (usesDynamicRoomEntryEnd)
             {
                 annotations.Add("room_entry_load_player_position_end");
+            }
+            if (usesDynamicLoadLevelStart)
+            {
+                annotations.Add("load_level_player_position_start");
             }
 
             if (!startEstimate.IsValid)
@@ -84,7 +97,7 @@ public sealed class IntervalGenerator
                 continue;
             }
 
-            var preRollMs = timedCandidate.IsCheckpointIntro || StartsAtRespawnLoadLevel(timedCandidate) ? 0 : options.PreRollMs;
+            var preRollMs = usesDynamicLoadLevelStart || timedCandidate.IsCheckpointIntro || StartsAtRespawnLoadLevel(timedCandidate) ? 0 : options.PreRollMs;
             var addsRoomEntryLoadDelay = IsStandaloneRoomEntryLoad(timedCandidate) && !usesDynamicRoomEntryEnd;
             var postRollMs = timedCandidate.IsCheckpointIntro && !addsRoomEntryLoadDelay ? 0 : options.PostRollMs;
             var startMs = Math.Max(0, startEstimate.EstimatedOutputDurationMs - preRollMs);
@@ -378,7 +391,7 @@ public sealed class IntervalGenerator
                     {
                         if (activeLoad is not null && level.Matches(current))
                         {
-                            var successStart = checkpointDeathSuccessStart ?? activeLoad;
+                            var successStart = activeLoad;
                             var reason = checkpointDeathSuccessStart is null ? "final_successful_attempt" : "checkpoint_death_successful_attempt";
                             AddCandidate(result, ref index, successStart, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, reason, false);
                             pendingCheckpointDeath = null;
@@ -987,8 +1000,75 @@ public sealed class IntervalGenerator
         => string.Equals(candidate.Start.EventType, "load_level", StringComparison.Ordinal) &&
            IsRespawnLoadLevel(candidate.Start);
 
+    private static bool IsLoadLevelStart(ClipCandidate candidate)
+        => string.Equals(candidate.Start.EventType, "load_level", StringComparison.Ordinal);
+
     private static bool IsStandaloneRoomEntryLoad(ClipCandidate candidate)
         => string.Equals(candidate.BaseValidReason, "room_entry_load", StringComparison.Ordinal);
+
+    private static bool TryFindLoadLevelPlayerPositionStart(RoomEvent loadLevel, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicStart)
+    {
+        dynamicStart = loadLevel;
+        var loadIndex = -1;
+        for (var i = 0; i < events.Count; i++)
+        {
+            if (ReferenceEquals(events[i], loadLevel))
+            {
+                loadIndex = i;
+                break;
+            }
+        }
+
+        if (loadIndex < 0)
+        {
+            return false;
+        }
+
+        TryGetSpawnPoint(loadLevel, out var spawnPoint);
+        RoomEvent? best = null;
+        var bestDistanceSquared = double.MaxValue;
+        for (var i = loadIndex + 1; i < events.Count; i++)
+        {
+            var current = events[i];
+            if (IsPlayerPositionSample(current))
+            {
+                if (!SameMapAndRoom(loadLevel, current) ||
+                    !SampleBelongsToLoad(current, loadLevel) ||
+                    !TryGetPlayerPosition(current, out var position))
+                {
+                    continue;
+                }
+
+                if (!TryGetSpawnPoint(loadLevel, out spawnPoint))
+                {
+                    dynamicStart = current;
+                    return true;
+                }
+
+                var distanceSquared = DistanceSquared(spawnPoint, position);
+                if (distanceSquared < bestDistanceSquared)
+                {
+                    best = current;
+                    bestDistanceSquared = distanceSquared;
+                }
+
+                continue;
+            }
+
+            if (IsPostLoadSemanticBoundary(current))
+            {
+                break;
+            }
+        }
+
+        if (best is null)
+        {
+            return false;
+        }
+
+        dynamicStart = best;
+        return true;
+    }
 
     private static bool TryFindRoomEntryLoadPlayerPositionEnd(ClipCandidate candidate, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicEnd)
     {

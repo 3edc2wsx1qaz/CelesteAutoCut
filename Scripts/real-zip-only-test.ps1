@@ -515,29 +515,49 @@ function Wait-TasIdle([string]$DebugRcBaseUrl, [int]$TimeoutSec = 120) {
     }
 }
 
+function Get-RoomEventLogPaths([string]$Path) {
+    if ($Path -match '[\*\?]') {
+        return @(Get-ChildItem -Path $Path -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | ForEach-Object { $_.FullName })
+    }
+
+    if (Test-Path -LiteralPath $Path) {
+        return @($Path)
+    }
+
+    $directory = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and (Test-Path -LiteralPath $directory)) {
+        return @(Get-ChildItem -LiteralPath $directory -Filter 'room_event_*.jsonl' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | ForEach-Object { $_.FullName })
+    }
+
+    return @()
+}
+
 function Get-RoomEventsSince([string]$Path, [datetime]$AfterUtc, [int]$TailCount = 400) {
-    if (-not (Test-Path $Path)) {
+    $paths = @(Get-RoomEventLogPaths -Path $Path)
+    if ($paths.Count -eq 0) {
         return @()
     }
 
     $events = New-Object System.Collections.Generic.List[object]
-    foreach ($line in @(Get-Content -LiteralPath $Path -Tail $TailCount -Encoding UTF8)) {
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            continue
-        }
-
-        try {
-            $event = $line | ConvertFrom-Json -ErrorAction Stop
-            $utcText = Get-PropValue $event @('utc', 'Utc')
-            if (-not $utcText) {
+    foreach ($logPath in $paths) {
+        foreach ($line in @(Get-Content -LiteralPath $logPath -Tail $TailCount -Encoding UTF8)) {
+            if ([string]::IsNullOrWhiteSpace($line)) {
                 continue
             }
 
-            $eventUtc = [DateTimeOffset]::Parse($utcText).UtcDateTime
-            if ($eventUtc -gt $AfterUtc) {
-                [void]$events.Add($event)
+            try {
+                $event = $line | ConvertFrom-Json -ErrorAction Stop
+                $utcText = Get-PropValue $event @('utc', 'Utc')
+                if (-not $utcText) {
+                    continue
+                }
+
+                $eventUtc = [DateTimeOffset]::Parse($utcText).UtcDateTime
+                if ($eventUtc -gt $AfterUtc) {
+                    [void]$events.Add($event)
+                }
+            } catch {
             }
-        } catch {
         }
     }
 
@@ -746,7 +766,7 @@ $modZipDuplicatePattern = 'CelesteAutoCut-*.zip'
 $helperDir = Join-Path $CelesteDir 'CelesteAutoCutTools\ObsClipPanel'
 $helperExe = Join-Path $helperDir 'ObsClipPanel.exe'
 $replayRoot = Join-Path $CelesteDir 'CelesteAutoCutReplays'
-$roomEventsPath = Join-Path $replayRoot 'room_events.jsonl'
+$roomEventsPath = Join-Path $replayRoot 'room_event_*.jsonl'
 $obsAutoRoot = Join-Path $replayRoot 'obs_auto'
 $sessionsRoot = Join-Path $obsAutoRoot 'sessions'
 $debugRcBaseUrl = 'http://localhost:32270'

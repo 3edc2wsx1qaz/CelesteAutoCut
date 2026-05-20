@@ -12,7 +12,7 @@ internal sealed class ObsAutoAssemblerLauncher {
     private const string Tag = "CelesteAutoCut";
     private const string HelperRelativePath = "ObsClipPanel\\ObsClipPanel.exe";
     private const string WorkingDirectoryName = "obs_auto";
-    private const string RoomEventsFileName = "room_events.jsonl";
+    private const string RoomEventsFilePattern = "room_event_*.jsonl";
     private readonly ReplayController replayController;
     private readonly object gate = new();
     private Process? process;
@@ -75,7 +75,7 @@ internal sealed class ObsAutoAssemblerLauncher {
 
             string workingDir = ResolveWorkingDirectory();
             Directory.CreateDirectory(workingDir);
-            string roomEventsPath = Path.Combine(replayController.ReplayDirectory, RoomEventsFileName);
+            string roomEventsPath = Path.Combine(replayController.ReplayDirectory, RoomEventsFilePattern);
             string stdoutPath = Path.Combine(workingDir, "obs-auto-stdout.log");
             string stderrPath = Path.Combine(workingDir, "obs-auto-stderr.log");
 

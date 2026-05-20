@@ -16,7 +16,6 @@ public sealed class PanelCoordinator : BackgroundService
     private PanelStatus status = new();
     private string currentSessionId = "";
     private bool recordingSessionActive;
-    private bool roomEventsClearedForPendingRecordingStart;
     private bool autoAssembleInFlight;
 
     public PanelCoordinator(PanelStateStore stateStore)
@@ -143,7 +142,7 @@ public sealed class PanelCoordinator : BackgroundService
         }
     }
 
-    public Task<ApiResult> StartRecordAsync() => InvokeObsRequestAsync("StartRecord", successMessage: "Recording started.", clearRoomEventsBeforeStart: true);
+    public Task<ApiResult> StartRecordAsync() => InvokeObsRequestAsync("StartRecord", successMessage: "Recording started.", requireNotRecording: true);
     public Task<ApiResult> StopRecordAsync() => InvokeObsRequestAsync("StopRecord", successMessage: "Recording stopped.");
     public Task<ApiResult> PauseRecordAsync() => InvokeObsRequestAsync("PauseRecord", successMessage: "Recording paused.");
     public Task<ApiResult> ResumeRecordAsync() => InvokeObsRequestAsync("ResumeRecord", successMessage: "Recording resumed.");
@@ -157,10 +156,6 @@ public sealed class PanelCoordinator : BackgroundService
             var settings = stateStore.GetSettings();
             EnsureCurrentSession(settings);
             var paths = EnsureSessionPaths(currentSessionId, settings, GetStatus().OutputPath);
-            if (!File.Exists(settings.RoomEventsPath))
-            {
-                throw new FileNotFoundException($"Room event log not found: {settings.RoomEventsPath}");
-            }
             if (!File.Exists(paths.ObsEventsPath))
             {
                 throw new FileNotFoundException($"OBS event log not found: {paths.ObsEventsPath}");
@@ -177,7 +172,13 @@ public sealed class PanelCoordinator : BackgroundService
             });
             JsonFile.Write(paths.SessionManifestPath, manifest);
 
-            var roomEvents = FilterRoomEventsForManifest(AppendOnlyJsonl.ReadAll<RoomEvent>(settings.RoomEventsPath), manifest, settings);
+            var roomEventsPath = ResolveRoomEventsPath(settings.RoomEventsPath, manifest);
+            if (string.IsNullOrWhiteSpace(roomEventsPath) || !File.Exists(roomEventsPath))
+            {
+                throw new FileNotFoundException($"Room event log not found: {settings.RoomEventsPath}");
+            }
+
+            var roomEvents = FilterRoomEventsForManifest(AppendOnlyJsonl.ReadAll<RoomEvent>(roomEventsPath), manifest, settings);
             var intervals = new IntervalGenerator().Generate(roomEvents, manifest, new IntervalGenerationOptions
             {
                 PreRollMs = settings.PreRollMs,
@@ -236,6 +237,7 @@ public sealed class PanelCoordinator : BackgroundService
                     ? $"Built final video with {intervals.Clips.Count} valid clip(s)."
                     : $"Built {assemblyOutputs.Count} map video(s) with {intervals.Clips.Count} valid clip(s)."
             });
+            DeleteRoomEventsLog(roomEventsPath);
             autoAssembleInFlight = false;
 
             return ApiResult.Ok("Built final video.", new
@@ -356,7 +358,6 @@ public sealed class PanelCoordinator : BackgroundService
         if (!outputActive && statusBefore.RecordingActive)
         {
             recordingSessionActive = false;
-            roomEventsClearedForPendingRecordingStart = false;
             if (settings.AutoAssembleOnStop)
             {
                 QueueAutoAssemble();
@@ -407,7 +408,6 @@ public sealed class PanelCoordinator : BackgroundService
                     if (!active && !isStoppingTransition && settings.AutoAssembleOnStop)
                     {
                         recordingSessionActive = false;
-                        roomEventsClearedForPendingRecordingStart = false;
                         QueueAutoAssemble();
                     }
                     break;
@@ -444,7 +444,7 @@ public sealed class PanelCoordinator : BackgroundService
         }
     }
 
-    private async Task<ApiResult> InvokeObsRequestAsync(string requestType, string successMessage, bool clearRoomEventsBeforeStart = false)
+    private async Task<ApiResult> InvokeObsRequestAsync(string requestType, string successMessage, bool requireNotRecording = false)
     {
         await operationLock.WaitAsync();
         try
@@ -454,25 +454,14 @@ public sealed class PanelCoordinator : BackgroundService
                 return ApiResult.Fail("OBS websocket is not connected.");
             }
 
-            if (clearRoomEventsBeforeStart)
+            if (requireNotRecording && (GetStatus().RecordingActive || recordingSessionActive))
             {
-                if (GetStatus().RecordingActive || recordingSessionActive)
-                {
-                    return ApiResult.Fail("OBS recording is already active.");
-                }
-
-                ClearRoomEventsLog(stateStore.GetSettings());
-                roomEventsClearedForPendingRecordingStart = true;
+                return ApiResult.Fail("OBS recording is already active.");
             }
 
             var result = await obsClient.RequestAsync(requestType, null, CancellationToken.None);
             if (!result.Success)
             {
-                if (clearRoomEventsBeforeStart)
-                {
-                    roomEventsClearedForPendingRecordingStart = false;
-                }
-
                 SetError(string.IsNullOrWhiteSpace(result.Comment) ? $"{requestType} failed." : result.Comment);
                 return ApiResult.Fail(string.IsNullOrWhiteSpace(result.Comment) ? $"{requestType} failed." : result.Comment);
             }
@@ -537,12 +526,6 @@ public sealed class PanelCoordinator : BackgroundService
             {
                 return;
             }
-
-            if (!roomEventsClearedForPendingRecordingStart)
-            {
-                ClearRoomEventsLog(settings);
-            }
-            roomEventsClearedForPendingRecordingStart = false;
 
             currentSessionId = SanitizeSessionName(null);
             var paths = EnsureSessionPaths(currentSessionId, settings, recordingOutputPath);
@@ -615,6 +598,112 @@ public sealed class PanelCoordinator : BackgroundService
         var minUtc = startUtc.Value.AddMilliseconds(-padMs);
         var maxUtc = endUtc.Value.AddMilliseconds(padMs);
         return events.Where(e => e.Utc >= minUtc && e.Utc <= maxUtc).ToList();
+    }
+
+    private static string? ResolveRoomEventsPath(string configuredPath, SessionManifest manifest)
+    {
+        var candidates = EnumerateRoomEventCandidates(configuredPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(File.Exists)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        if (candidates.Count == 1)
+        {
+            return candidates[0];
+        }
+
+        return candidates
+            .Select(path => new
+            {
+                Path = path,
+                RelevantEventCount = CountRelevantRoomEvents(path, manifest),
+                LastWriteTimeUtc = File.GetLastWriteTimeUtc(path)
+            })
+            .OrderByDescending(candidate => candidate.RelevantEventCount)
+            .ThenByDescending(candidate => candidate.LastWriteTimeUtc)
+            .First()
+            .Path;
+    }
+
+    private static IEnumerable<string> EnumerateRoomEventCandidates(string configuredPath)
+    {
+        var fullPath = Path.GetFullPath(configuredPath);
+        if (Directory.Exists(fullPath))
+        {
+            foreach (var path in Directory.EnumerateFiles(fullPath, "room_event_*.jsonl"))
+            {
+                yield return path;
+            }
+            yield break;
+        }
+
+        var directory = Path.GetDirectoryName(fullPath) ?? ".";
+        var fileName = Path.GetFileName(fullPath);
+        if (fileName.IndexOf('*') >= 0 || fileName.IndexOf('?') >= 0)
+        {
+            if (Directory.Exists(directory))
+            {
+                foreach (var path in Directory.EnumerateFiles(directory, fileName))
+                {
+                    yield return path;
+                }
+            }
+            yield break;
+        }
+
+        yield return fullPath;
+        if (string.Equals(fileName, "room_events.jsonl", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, "room_event.jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Directory.Exists(directory))
+            {
+                foreach (var path in Directory.EnumerateFiles(directory, "room_event_*.jsonl"))
+                {
+                    yield return path;
+                }
+            }
+        }
+    }
+
+    private static int CountRelevantRoomEvents(string path, SessionManifest manifest)
+    {
+        try
+        {
+            var events = AppendOnlyJsonl.ReadAll<RoomEvent>(path);
+            var startUtc = manifest.Recordings.Select(r => r.StartUtc).Where(v => v.HasValue).Min();
+            var endUtc = manifest.Recordings.Select(r => r.EndUtc).Where(v => v.HasValue).Max();
+            if (!startUtc.HasValue || !endUtc.HasValue)
+            {
+                return events.Count;
+            }
+
+            var minUtc = startUtc.Value.AddSeconds(-5);
+            var maxUtc = endUtc.Value.AddSeconds(5);
+            return events.Count(e => e.Utc >= minUtc && e.Utc <= maxUtc);
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
+    private static void DeleteRoomEventsLog(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // The final video is already built; cleanup is best effort if the game writes at the same instant.
+        }
     }
 
     private static async Task<string> EnsureFfmpegAsync(PanelSettings settings, CancellationToken cancellationToken)
@@ -692,18 +781,6 @@ public sealed class PanelCoordinator : BackgroundService
     {
         Directory.CreateDirectory(settings.WorkingDirectory);
         Directory.CreateDirectory(Path.Combine(settings.WorkingDirectory, "sessions"));
-    }
-
-    private static void ClearRoomEventsLog(PanelSettings settings)
-    {
-        var path = Path.GetFullPath(settings.RoomEventsPath);
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        AppendOnlyJsonl.Clear(path);
     }
 
     private static void WriteClipSelectionLog(SessionPaths paths, string sessionId, ClipIntervalsDocument intervals)

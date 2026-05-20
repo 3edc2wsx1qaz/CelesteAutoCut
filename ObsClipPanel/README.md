@@ -37,14 +37,14 @@ OBS -> `Tools` -> `WebSocket Server Settings`
 - 开始/停止/暂停/继续录制
 - 触发录制分段文件
 - 自动写 `obs_events.jsonl`
-- 读取 Celeste 的 `room_events.jsonl`
+- 读取 Celeste 的 `room_event_*.jsonl`
 - 生成 `session_manifest.json`
 - 生成 `clip_intervals.json`
 - 调 ffmpeg 产出最终视频
 
 ## 当前默认路径
 
-- room events: `D:\Steam\steamapps\common\Celeste\CelesteAutoCutReplays\room_events.jsonl`
+- room events: `D:\Steam\steamapps\common\Celeste\CelesteAutoCutReplays\room_event_*.jsonl`
 - OBS websocket: `ws://127.0.0.1:4455`
 
 这些都可以在面板里修改并保存。

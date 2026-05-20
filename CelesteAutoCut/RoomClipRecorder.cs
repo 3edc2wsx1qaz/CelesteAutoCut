@@ -14,7 +14,8 @@ internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 60;
     private const long PlayerPositionSampleIntervalFrames = 20;
     private const long PlayerPositionSampleWindowFrames = 480;
-    private const string EventLogFileName = "room_events.jsonl";
+    private const string EventLogPrefix = "room_event_";
+    private const string EventLogExtension = ".jsonl";
     private const string StatusFileName = "room_clip_session.json";
     private readonly ReplayController replayController;
     private readonly JsonSerializerOptions jsonOptions = new() {
@@ -48,12 +49,15 @@ internal sealed class RoomClipRecorder {
     private RoomClipEvent? bestPlayerPositionSampleEvent;
     private bool bestPlayerPositionSampleIsStationary;
     private double bestPlayerPositionSampleDistanceSquared = double.MaxValue;
+    private string eventLogPath = string.Empty;
 
     public RoomClipRecorder(ReplayController replayController) {
         this.replayController = replayController;
     }
 
-    public string EventLogPath => Path.Combine(replayController.ReplayDirectory, EventLogFileName);
+    public string EventLogPath => string.IsNullOrWhiteSpace(eventLogPath)
+        ? ResolveLatestEventLogPath(replayController.ReplayDirectory)
+        : eventLogPath;
     public string StatusPath => Path.Combine(replayController.ReplayDirectory, StatusFileName);
     public bool Active => active;
 
@@ -63,6 +67,7 @@ internal sealed class RoomClipRecorder {
         }
 
         Directory.CreateDirectory(replayController.ReplayDirectory);
+        eventLogPath = CreateTimestampedEventLogPath(replayController.ReplayDirectory);
 
         active = true;
         sessionId = Guid.NewGuid().ToString("N");
@@ -187,8 +192,8 @@ internal sealed class RoomClipRecorder {
 
     public void ResetLogs() {
         Directory.CreateDirectory(replayController.ReplayDirectory);
-        using (var eventLog = new FileStream(EventLogPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite)) {
-            eventLog.SetLength(0);
+        foreach (var path in Directory.EnumerateFiles(replayController.ReplayDirectory, EventLogPrefix + "*" + EventLogExtension)) {
+            File.Delete(path);
         }
 
         if (File.Exists(StatusPath)) {
@@ -201,6 +206,7 @@ internal sealed class RoomClipRecorder {
         mapSid = null;
         areaMode = null;
         chapter = null;
+        eventLogPath = string.Empty;
         gameFrame = 0;
         statusDirty = false;
         lastStatusWriteFrame = long.MinValue;
@@ -216,6 +222,7 @@ internal sealed class RoomClipRecorder {
         AreaMode = areaMode,
         Chapter = chapter,
         CurrentRoom = currentRoom,
+        EventLogPath = string.IsNullOrWhiteSpace(eventLogPath) ? null : eventLogPath,
         GameFrame = gameFrame,
         ChapterTimeMs = TryGetChapterTimeMs(),
         UpdatedAtUtc = DateTime.UtcNow.ToString("O")
@@ -394,10 +401,36 @@ internal sealed class RoomClipRecorder {
 
     private void AppendEvent(RoomClipEvent entry) {
         Directory.CreateDirectory(replayController.ReplayDirectory);
+        if (string.IsNullOrWhiteSpace(eventLogPath)) {
+            eventLogPath = CreateTimestampedEventLogPath(replayController.ReplayDirectory);
+        }
+
         using (var stream = new FileStream(EventLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
         using (var writer = new StreamWriter(stream)) {
             writer.WriteLine(JsonSerializer.Serialize(entry, jsonOptions));
         }
+    }
+
+    private static string CreateTimestampedEventLogPath(string replayDirectory) {
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
+        var path = Path.Combine(replayDirectory, EventLogPrefix + timestamp + EventLogExtension);
+        for (var suffix = 1; File.Exists(path); suffix++) {
+            path = Path.Combine(replayDirectory, $"{EventLogPrefix}{timestamp}-{suffix}{EventLogExtension}");
+        }
+
+        return path;
+    }
+
+    private static string ResolveLatestEventLogPath(string replayDirectory) {
+        if (!Directory.Exists(replayDirectory)) {
+            return Path.Combine(replayDirectory, EventLogPrefix + DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture) + EventLogExtension);
+        }
+
+        var latest = Directory.EnumerateFiles(replayDirectory, EventLogPrefix + "*" + EventLogExtension)
+            .Select(path => new FileInfo(path))
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .FirstOrDefault();
+        return latest?.FullName ?? Path.Combine(replayDirectory, EventLogPrefix + DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture) + EventLogExtension);
     }
 
     private void WriteStatus(bool force = false) {

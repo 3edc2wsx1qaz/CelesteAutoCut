@@ -103,7 +103,7 @@ public sealed class PanelStateStore
             ObsWebSocketUrl = string.IsNullOrWhiteSpace(input.ObsWebSocketUrl) ? "ws://127.0.0.1:4455" : input.ObsWebSocketUrl.Trim(),
             ObsWebSocketPassword = input.ObsWebSocketPassword ?? "",
             WorkingDirectory = NormalizeRequiredPath(input.WorkingDirectory, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CelesteAutoCutObsPanel")),
-            RoomEventsPath = NormalizeRequiredPath(input.RoomEventsPath, @"D:\Steam\steamapps\common\Celeste\CelesteAutoCutReplays\room_events.jsonl"),
+            RoomEventsPath = NormalizeRequiredPath(input.RoomEventsPath, @"D:\Steam\steamapps\common\Celeste\CelesteAutoCutReplays\room_event_*.jsonl"),
             OutputDirectory = NormalizeOptionalPath(input.OutputDirectory),
             FfmpegPath = string.IsNullOrWhiteSpace(input.FfmpegPath) ? "" : Path.GetFullPath(input.FfmpegPath.Trim()),
             PollIntervalMs = Math.Max(1000, input.PollIntervalMs),

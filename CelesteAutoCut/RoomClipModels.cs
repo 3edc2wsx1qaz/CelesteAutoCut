@@ -32,6 +32,7 @@ public sealed class RoomClipSessionStatus {
     public string? AreaMode { get; set; }
     public string? Chapter { get; set; }
     public string? CurrentRoom { get; set; }
+    public string? EventLogPath { get; set; }
     public long GameFrame { get; set; }
     public long? ChapterTimeMs { get; set; }
     public string UpdatedAtUtc { get; set; } = DateTime.UtcNow.ToString("O");
