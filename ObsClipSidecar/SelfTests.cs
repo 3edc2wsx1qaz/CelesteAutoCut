@@ -18,6 +18,8 @@ public static class SelfTests
             ("load level becomes attempt reset after failure", LoadLevelResetsAttemptAfterFailure),
             ("respawn load clips do not include death preroll", RespawnLoadClipsDoNotIncludeDeathPreroll),
             ("late checkpoint respawn transition counts as success", LateCheckpointRespawnTransitionCountsAsSuccess),
+            ("changed respawn point keeps checkpoint death route", ChangedRespawnPointKeepsCheckpointDeathRoute),
+            ("same respawn point does not keep death route", SameRespawnPointDoesNotKeepDeathRoute),
             ("respawn attempt with another death is discarded", RespawnAttemptWithAnotherDeathIsDiscarded),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
@@ -276,6 +278,61 @@ public static class SelfTests
         var success = doc.Clips.Single(c => c.Reasons.Contains("final_successful_attempt"));
         Assert(success.StartUtc == lateCheckpointRespawnLoad && success.EndUtc == transition, "late checkpoint respawn should keep respawn load -> transition");
         Assert(success.StartUtc > death, "success clip must start after the death event");
+    }
+
+    private static void ChangedRespawnPointKeepsCheckpointDeathRoute()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var firstLoad = start.AddMilliseconds(200);
+        var death = start.AddSeconds(1);
+        var respawnLoad = start.AddMilliseconds(1_600);
+        var transition = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = firstLoad, Room = "a", MapSid = "map", Notes = RespawnNotes("Transition", 10, 20) },
+            new() { EventType = "death", Utc = death, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = RespawnNotes("Respawn", 80, 20) },
+            new() { EventType = "transition", Utc = transition, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        Assert(HasClipCovering(doc, firstLoad, transition), "changed respawn point should keep load -> death -> load -> transition as one legal route");
+        Assert(!doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == transition), "changed respawn point should not reduce success to the respawn load only");
+        Assert(!doc.Warnings.Any(w => w.Contains("linear_discard_death_before_success", StringComparison.Ordinal)), "legal checkpoint-death route should not log the death as discarded");
+    }
+
+    private static void SameRespawnPointDoesNotKeepDeathRoute()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var firstLoad = start.AddMilliseconds(200);
+        var respawnLoad = start.AddMilliseconds(1_600);
+        var transition = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = firstLoad, Room = "a", MapSid = "map", Notes = RespawnNotes("Transition", 10, 20) },
+            new() { EventType = "death", Utc = start.AddSeconds(1), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = RespawnNotes("Respawn", 10, 20) },
+            new() { EventType = "transition", Utc = transition, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        Assert(!HasClipCovering(doc, firstLoad, transition), "same respawn point should not keep the failed death route");
+        Assert(HasClipCovering(doc, respawnLoad, transition), "same respawn point should still keep normal respawn load -> transition");
+        Assert(doc.Warnings.Any(w => w.Contains("linear_discard_death_before_success", StringComparison.Ordinal)), "same respawn point should still report the failed death route");
     }
 
     private static void RespawnAttemptWithAnotherDeathIsDiscarded()
@@ -915,6 +972,14 @@ public static class SelfTests
         new RoomEvent { EventType = "load_level", Utc = start.AddSeconds(1), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
         new RoomEvent { EventType = "transition", Utc = start.AddSeconds(endOffsetSeconds), Room = "a", NextRoom = "b", MapSid = "map" }
     ];
+
+    private static Dictionary<string, object?> RespawnNotes(string playerIntro, double x, double y) => new()
+    {
+        ["playerIntro"] = playerIntro,
+        ["hasRespawnPoint"] = "True",
+        ["respawnPointX"] = x.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ["respawnPointY"] = y.ToString(System.Globalization.CultureInfo.InvariantCulture)
+    };
 
     private static RecordingManifest Recording(string id, DateTimeOffset startUtc, string path, long startMs, long endMs) =>
         Recording(id, startUtc, [new RecordingFileManifest { Path = path, StartDurationMs = startMs, EndDurationMs = endMs }]);

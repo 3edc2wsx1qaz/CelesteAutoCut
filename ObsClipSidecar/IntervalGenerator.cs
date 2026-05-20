@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text.Json;
+
 namespace ObsClipSidecar;
 
 public sealed class IntervalGenerator
@@ -236,19 +239,36 @@ public sealed class IntervalGenerator
 
                 var level = LevelIdentity.From(firstLoad);
                 RoomEvent? activeLoad = firstLoad;
+                RoomEvent? checkpointDeathLoad = null;
+                RoomEvent? checkpointDeathSuccessStart = null;
+                RoomEvent? pendingCheckpointDeath = null;
                 var sessionDone = false;
+
+                void FlushPendingCheckpointDeathWarning()
+                {
+                    if (pendingCheckpointDeath is not null)
+                    {
+                        warnings.Add(DiscardWarning("linear_discard_death_before_success", pendingCheckpointDeath));
+                    }
+
+                    pendingCheckpointDeath = null;
+                    checkpointDeathLoad = null;
+                    checkpointDeathSuccessStart = null;
+                }
 
                 while (i < events.Count)
                 {
                     var current = events[i];
                     if (IsSessionStart(current))
                     {
+                        FlushPendingCheckpointDeathWarning();
                         sessionDone = true;
                         break;
                     }
 
                     if (IsSessionEnd(current))
                     {
+                        FlushPendingCheckpointDeathWarning();
                         i++;
                         sessionDone = true;
                         break;
@@ -256,12 +276,14 @@ public sealed class IntervalGenerator
 
                     if (IsRoomEntry(current))
                     {
+                        FlushPendingCheckpointDeathWarning();
                         warnings.Add(DiscardWarning("linear_discard_missing_success_before_room_enter", current));
                         break;
                     }
 
                     if (IsExitLike(current))
                     {
+                        FlushPendingCheckpointDeathWarning();
                         if (activeLoad is not null)
                         {
                             warnings.Add(DiscardWarning("linear_discard_load_to_exit", current));
@@ -272,8 +294,28 @@ public sealed class IntervalGenerator
                         break;
                     }
 
-                    if (current.EventType is "death" or "load_end")
+                    if (current.EventType is "death")
                     {
+                        if (activeLoad is not null && level.Matches(current))
+                        {
+                            checkpointDeathLoad = activeLoad;
+                            pendingCheckpointDeath = current;
+                        }
+                        else
+                        {
+                            FlushPendingCheckpointDeathWarning();
+                            warnings.Add(DiscardWarning("linear_discard_death_before_success", current));
+                        }
+
+                        activeLoad = null;
+                        checkpointDeathSuccessStart = null;
+                        i++;
+                        continue;
+                    }
+
+                    if (current.EventType is "load_end")
+                    {
+                        FlushPendingCheckpointDeathWarning();
                         activeLoad = null;
                         warnings.Add(DiscardWarning("linear_discard_death_before_success", current));
                         i++;
@@ -284,10 +326,22 @@ public sealed class IntervalGenerator
                     {
                         if (level.Matches(current))
                         {
+                            if (checkpointDeathLoad is not null && RespawnPointChanged(checkpointDeathLoad, current))
+                            {
+                                checkpointDeathSuccessStart = checkpointDeathLoad;
+                                pendingCheckpointDeath = null;
+                            }
+                            else
+                            {
+                                FlushPendingCheckpointDeathWarning();
+                            }
+
+                            checkpointDeathLoad = null;
                             activeLoad = current;
                         }
                         else
                         {
+                            FlushPendingCheckpointDeathWarning();
                             warnings.Add(DiscardWarning("linear_discard_level_mismatch", current));
                         }
 
@@ -299,12 +353,16 @@ public sealed class IntervalGenerator
                     {
                         if (activeLoad is not null && level.Matches(current))
                         {
-                            AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "final_successful_attempt", false);
+                            var successStart = checkpointDeathSuccessStart ?? activeLoad;
+                            var reason = checkpointDeathSuccessStart is null ? "final_successful_attempt" : "checkpoint_death_successful_attempt";
+                            AddCandidate(result, ref index, successStart, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, reason, false);
+                            pendingCheckpointDeath = null;
                             i++;
                             KeepTransitionTail(events, ref i, current, warnings, result, ref index);
                             break;
                         }
 
+                        FlushPendingCheckpointDeathWarning();
                         warnings.Add(DiscardWarning("linear_discard_transition_without_live_load", current));
                         i++;
                         continue;
@@ -325,6 +383,7 @@ public sealed class IntervalGenerator
                             break;
                         }
 
+                        FlushPendingCheckpointDeathWarning();
                         warnings.Add(DiscardWarning("linear_discard_strawberry_without_live_load", current));
                         i++;
                         continue;
@@ -340,6 +399,7 @@ public sealed class IntervalGenerator
                         }
                         else
                         {
+                            FlushPendingCheckpointDeathWarning();
                             warnings.Add(DiscardWarning("linear_discard_level_complete_without_live_load", current));
                             i++;
                         }
@@ -1095,6 +1155,28 @@ public sealed class IntervalGenerator
     private static bool IsRespawnLoadLevel(RoomEvent loadLevel)
         => string.Equals(GetNoteString(loadLevel, "playerIntro"), "Respawn", StringComparison.OrdinalIgnoreCase);
 
+    private static bool RespawnPointChanged(RoomEvent previousLoad, RoomEvent nextLoad)
+        => TryGetRespawnPoint(previousLoad, out var previous) &&
+           TryGetRespawnPoint(nextLoad, out var next) &&
+           !SameRespawnPoint(previous, next);
+
+    private static bool SameRespawnPoint(RespawnPoint left, RespawnPoint right)
+        => Math.Abs(left.X - right.X) < 0.001 &&
+           Math.Abs(left.Y - right.Y) < 0.001;
+
+    private static bool TryGetRespawnPoint(RoomEvent loadLevel, out RespawnPoint point)
+    {
+        point = default;
+        if (!TryGetNoteDouble(loadLevel, "respawnPointX", out var x) ||
+            !TryGetNoteDouble(loadLevel, "respawnPointY", out var y))
+        {
+            return false;
+        }
+
+        point = new RespawnPoint(x, y);
+        return true;
+    }
+
     private static bool IsStrawberryCollect(RoomEvent e)
         => string.Equals(e.EventType, "strawberry_collect", StringComparison.Ordinal) ||
            string.Equals(e.EventType, "berry_collect", StringComparison.Ordinal);
@@ -1149,6 +1231,38 @@ public sealed class IntervalGenerator
         }
 
         return value.ToString();
+    }
+
+    private static bool TryGetNoteDouble(RoomEvent e, string key, out double value)
+    {
+        value = default;
+        if (e.Notes is null || !e.Notes.TryGetValue(key, out var raw) || raw is null)
+        {
+            return false;
+        }
+
+        switch (raw)
+        {
+            case double d:
+                value = d;
+                return true;
+            case float f:
+                value = f;
+                return true;
+            case int i:
+                value = i;
+                return true;
+            case long l:
+                value = l;
+                return true;
+            case JsonElement json when json.ValueKind == JsonValueKind.Number && json.TryGetDouble(out var d):
+                value = d;
+                return true;
+            case JsonElement json when json.ValueKind == JsonValueKind.String:
+                return double.TryParse(json.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+            default:
+                return double.TryParse(raw.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
     }
 
     private static void AddInvalid(ClipCandidate candidate, BoundaryEstimate start, BoundaryEstimate end, List<string> reasons, List<ClipInterval> invalid, long? startOverride = null, long? endOverride = null, string pausePolicy = "no_pause_seen")
@@ -1209,6 +1323,8 @@ public sealed class IntervalGenerator
     private readonly record struct RoomIntro(RoomEvent Entry, RoomEvent InitialCheckpoint);
 
     private readonly record struct IntroIdentity(string MapSid, string Room, DateTimeOffset StartUtc, DateTimeOffset EndUtc, string Reason);
+
+    private readonly record struct RespawnPoint(double X, double Y);
 
     private sealed class PreparedClip
     {

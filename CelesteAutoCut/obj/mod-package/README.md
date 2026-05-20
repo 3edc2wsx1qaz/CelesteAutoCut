@@ -135,12 +135,13 @@ helper 工作目录：
 - helper 先按事件时间得到有序事件流，然后候选区间生成只使用一个向前游标；每个事件最多被扫描常数次，候选生成复杂度为 O(n)；
 - 每个 session 内，若出现 `session_start`，先保留 `session_start -> first room_enter`，原因标记为 `session_intro`；
 - 随后从当前 `room_enter` 开始，先保留 `room_enter -> load_level`，原因标记为 `room_entry_load`，并记录当前关卡身份（`MapSid + Room`）；
-- 对同一关卡向后贪心寻找第一个无死亡成功终点：
+- 对同一关卡向后贪心寻找第一个普通无死亡成功终点，或符合后述条件的终点前 checkpoint 特例：
   - `load_level -> transition`：保留为 `final_successful_attempt`，再保留 `transition -> first room_enter`，原因标记为 `transition_to_room_enter`；
   - `load_level -> strawberry_collect`：保留为 `strawberry_collect_success`，再保留 `strawberry_collect -> first room_enter/exit`，原因标记为 `strawberry_collect_to_room_enter` 或 `strawberry_collect_to_exit`，这段尾巴中间允许出现 `death`；
   - `load_level -> level_complete`：保留为 `final_successful_attempt`，然后继续保留后续 `level_complete -> exit`；
   - `load_level -> exit`：不保留成功片段，直接跳到后续 session；
-- `death` / `load_end` 会使当前 `load_level` 失效；只有后续同一 `MapSid + Room` 的新 `load_level` 才能重新成为成功片段起点；
+- 普通情况下，`death` / `load_end` 会使当前 `load_level` 失效；只有后续同一 `MapSid + Room` 的新 `load_level` 才能重新成为成功片段起点；
+- 终点前 checkpoint 特例：同一房间内 `load_level(A) -> death -> load_level(B) -> transition` 也可算合法成功段，并从 A 保留到 `transition`，但必须满足 A 与 B 的 `respawnPointX/Y` 都存在且坐标不同；A->death、death->B、B->transition 三段中不能再出现额外 `death` / `load_end`；这个区间原因标记为 `checkpoint_death_successful_attempt`（若和相邻进房/转场区间时间相连，最终可能合并为 `merged_linear_interval`）；
 - Respawn 的 `load_level` 不再由死亡后一帧的 `Level.Update` 猜测写入，而是在 Celeste 实际执行 `Level.LoadLevel(playerIntro=Respawn)` 并加载完玩家后写入；因此成功片段从 Respawn checkpoint 的实际加载完成点开始，不会把死亡动画当作片段开头；
 - Celeste 死亡后会按 `Session.RespawnPoint` / 当前房间 spawn 点重新 `LoadLevel(Respawn)`：如果该 checkpoint 位于房间末尾，随后无死亡进入下一个房间，则 `Respawn load_level -> transition` 算成功片段；如果回到房间开头或中途 checkpoint，也同样从该 Respawn load 开始，只有后续再次 `death` 才会丢弃这次尝试；
 - 每个 `load_level` 事件都会在 `room_events.jsonl` 的 `notes` 中记录当时的 `Session.RespawnPoint`：`hasRespawnPoint`、`respawnPointX`、`respawnPointY`，用于确认这次加载对应房间开头、中途还是末尾复活点；
@@ -238,6 +239,7 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 
 - 首房间初始 `Transition load_level` 不截断房间开头；
 - 死亡房间保留“进入房间 -> 初始 `load_level`”，成功片段从 `Respawn load_level` 精确开始而不是从 `death` 或死亡前 pre-roll 开始；
+- 终点前 checkpoint 特例：`load -> death -> load -> transition` 只有在两次 `load_level` 的 respawnPoint 坐标不同且中间没有额外死亡时，才会从第一次 load 保留到 transition；坐标相同则仍退回普通 Respawn load 成功段；
 - 分支后再次进入同名房间时，每次访问独立生成片段；
 - 折返抑制已取消，来回折返会按普通 `room_enter/load_level/transition` 事件生成片段；
 - 支路返回 Hub 后继续前进的路线会被保留；
