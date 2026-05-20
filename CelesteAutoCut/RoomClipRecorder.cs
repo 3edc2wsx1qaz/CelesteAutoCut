@@ -110,9 +110,9 @@ internal sealed class RoomClipRecorder {
                 ["reason"] = "transition",
                 ["source"] = "observed_state"
             });
-            WriteLoadLevel(observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
+            WriteLoadLevel(session, observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
         } else if (pendingInitialLoadLevel) {
-            WriteLoadLevel(observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
+            WriteLoadLevel(session, observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
         }
 
         if (chapterComplete && !chapterCompleteLogged) {
@@ -165,7 +165,7 @@ internal sealed class RoomClipRecorder {
         lastObservedRoom = observedRoom;
         observedSession = session;
         pendingInitialLoadLevel = false;
-        WriteLoadLevel(observedRoom, playerIntro, isFromLoader, source: "level_load_hook");
+        WriteLoadLevel(session, observedRoom, playerIntro, isFromLoader, source: "level_load_hook");
     }
 
     public void OnStrawberryCollect(Strawberry strawberry) {
@@ -245,13 +245,26 @@ internal sealed class RoomClipRecorder {
         WriteStatus(force: true);
     }
 
-    private void WriteLoadLevel(string room, string playerIntro, bool isFromLoader, string source) {
+    private void WriteLoadLevel(Session session, string room, string playerIntro, bool isFromLoader, string source) {
         pendingInitialLoadLevel = false;
-        WriteEvent(RoomClipEventTypes.LoadLevel, room, notes: new Dictionary<string, string?> {
+        var notes = new Dictionary<string, string?> {
             ["playerIntro"] = playerIntro,
             ["isFromLoader"] = isFromLoader.ToString(),
             ["source"] = source
-        });
+        };
+        AddRespawnPointNotes(notes, session);
+        WriteEvent(RoomClipEventTypes.LoadLevel, room, notes: notes);
+    }
+
+    private static void AddRespawnPointNotes(Dictionary<string, string?> notes, Session session) {
+        var respawnPoint = session.RespawnPoint;
+        notes["hasRespawnPoint"] = respawnPoint.HasValue.ToString();
+        if (!respawnPoint.HasValue) {
+            return;
+        }
+
+        notes["respawnPointX"] = respawnPoint.Value.X.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        notes["respawnPointY"] = respawnPoint.Value.Y.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void WriteEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null) {
