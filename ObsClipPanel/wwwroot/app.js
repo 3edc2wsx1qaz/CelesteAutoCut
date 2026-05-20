@@ -1,5 +1,5 @@
 ﻿const ids = [
-  'obsUrl','obsPassword','workingDirectory','roomEventsPath','ffmpegPath','finalOutputName',
+  'obsUrl','obsPassword','workingDirectory','roomEventsPath','outputDirectory','ffmpegPath','finalOutputName',
   'pollIntervalMs','preRollMs','postRollMs','maxAnchorGapMs','maxCutErrorMs',
   'splitOnPause','requireExistingFiles','autoAssembleOnStop'
 ];
@@ -24,6 +24,7 @@ function fillSettings(settings) {
   el.obsPassword.value = settings.obsWebSocketPassword || '';
   el.workingDirectory.value = settings.workingDirectory || '';
   el.roomEventsPath.value = settings.roomEventsPath || '';
+  el.outputDirectory.value = settings.outputDirectory || '';
   el.ffmpegPath.value = settings.ffmpegPath || '';
   el.finalOutputName.value = settings.finalOutputName || '';
   el.pollIntervalMs.value = settings.pollIntervalMs ?? 500;
@@ -42,6 +43,7 @@ function readSettings() {
     obsWebSocketPassword: el.obsPassword.value,
     workingDirectory: el.workingDirectory.value,
     roomEventsPath: el.roomEventsPath.value,
+    outputDirectory: el.outputDirectory.value,
     ffmpegPath: el.ffmpegPath.value,
     finalOutputName: el.finalOutputName.value,
     pollIntervalMs: Number(el.pollIntervalMs.value || 500),

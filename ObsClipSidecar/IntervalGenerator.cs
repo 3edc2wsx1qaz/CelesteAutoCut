@@ -73,6 +73,12 @@ public sealed class IntervalGenerator
             var postRollMs = candidate.IsCheckpointIntro && !addsRoomEntryLoadDelay ? 0 : options.PostRollMs;
             var startMs = Math.Max(0, startEstimate.EstimatedOutputDurationMs - preRollMs);
             var endMs = endEstimate.EstimatedOutputDurationMs + postRollMs;
+            var recordingEndMs = recording.Files.Count == 0 ? long.MaxValue : recording.Files.Max(f => f.EndDurationMs);
+            if (postRollMs > 0 && endEstimate.EstimatedOutputDurationMs <= recordingEndMs && endMs > recordingEndMs)
+            {
+                endMs = recordingEndMs;
+                annotations.Add("end_postroll_clamped_to_recording_end");
+            }
             var preparedClip = new PreparedClip(candidate, startEstimate, endEstimate, recording, startMs, endMs, baseReasons);
             preparedClip.Annotations.AddRange(annotations);
             if (addsRoomEntryLoadDelay && postRollMs > 0)

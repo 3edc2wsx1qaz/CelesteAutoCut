@@ -34,6 +34,7 @@ public sealed class PanelStateStore
             ObsWebSocketPassword = current.ObsWebSocketPassword,
             WorkingDirectory = current.WorkingDirectory,
             RoomEventsPath = current.RoomEventsPath,
+            OutputDirectory = current.OutputDirectory,
             FfmpegPath = current.FfmpegPath,
             PollIntervalMs = current.PollIntervalMs,
             PreRollMs = current.PreRollMs,
@@ -71,6 +72,12 @@ public sealed class PanelStateStore
 
     public string ResolvePreferredOutputDirectory(string? recordingOutputPath = null)
     {
+        var configuredOutputDirectory = GetSettings().OutputDirectory;
+        if (!string.IsNullOrWhiteSpace(configuredOutputDirectory))
+        {
+            return configuredOutputDirectory;
+        }
+
         if (!string.IsNullOrWhiteSpace(recordingOutputPath))
         {
             var recordingDirectory = Path.GetDirectoryName(Path.GetFullPath(recordingOutputPath));
@@ -97,6 +104,7 @@ public sealed class PanelStateStore
             ObsWebSocketPassword = input.ObsWebSocketPassword ?? "",
             WorkingDirectory = NormalizeRequiredPath(input.WorkingDirectory, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CelesteAutoCutObsPanel")),
             RoomEventsPath = NormalizeRequiredPath(input.RoomEventsPath, @"D:\Steam\steamapps\common\Celeste\CelesteAutoCutReplays\room_events.jsonl"),
+            OutputDirectory = NormalizeOptionalPath(input.OutputDirectory),
             FfmpegPath = string.IsNullOrWhiteSpace(input.FfmpegPath) ? "" : Path.GetFullPath(input.FfmpegPath.Trim()),
             PollIntervalMs = Math.Max(1000, input.PollIntervalMs),
             PreRollMs = Math.Max(0, input.PreRollMs),
@@ -144,6 +152,11 @@ public sealed class PanelStateStore
     {
         var value = string.IsNullOrWhiteSpace(candidate) ? fallback : candidate.Trim();
         return Path.GetFullPath(value);
+    }
+
+    private static string NormalizeOptionalPath(string? candidate)
+    {
+        return string.IsNullOrWhiteSpace(candidate) ? "" : Path.GetFullPath(candidate.Trim());
     }
 
     private static PanelSettings LoadFromObsDefaults()
@@ -315,6 +328,7 @@ public sealed class PanelStateStore
             ObsWebSocketPassword = Read("CELESTE_REPLAY_OBS_WS_PASSWORD") ?? settings.ObsWebSocketPassword,
             WorkingDirectory = NormalizeRequiredPath(Read("CELESTE_REPLAY_WORKING_DIRECTORY") ?? settings.WorkingDirectory, settings.WorkingDirectory),
             RoomEventsPath = NormalizeRequiredPath(Read("CELESTE_REPLAY_ROOM_EVENTS_PATH") ?? settings.RoomEventsPath, settings.RoomEventsPath),
+            OutputDirectory = NormalizeOptionalPath(Read("CELESTE_REPLAY_OUTPUT_DIRECTORY") ?? settings.OutputDirectory),
             FfmpegPath = string.IsNullOrWhiteSpace(Read("CELESTE_REPLAY_FFMPEG_PATH")) ? settings.FfmpegPath : Path.GetFullPath(Read("CELESTE_REPLAY_FFMPEG_PATH")!),
             PollIntervalMs = Math.Max(1000, ReadLong("CELESTE_REPLAY_POLL_MS") ?? settings.PollIntervalMs),
             PreRollMs = ReadLong("CELESTE_REPLAY_PRE_ROLL_MS") ?? settings.PreRollMs,

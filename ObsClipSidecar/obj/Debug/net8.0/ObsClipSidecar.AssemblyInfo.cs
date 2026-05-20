@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ObsClipSidecar")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a57ef2e1746eea18d0db0a40f4b7009a87ed7e24")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e8134dcd8d2b0e3c60c76754ed96133088c74b5d")]
 [assembly: System.Reflection.AssemblyProductAttribute("ObsClipSidecar")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ObsClipSidecar")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

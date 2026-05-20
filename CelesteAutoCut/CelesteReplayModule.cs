@@ -1,7 +1,6 @@
 using System;
 using Celeste;
 using Celeste.Mod;
-using Microsoft.Xna.Framework.Input;
 using Monocle;
 
 namespace Celeste.Mod.CelesteAutoCut;
@@ -11,10 +10,8 @@ public sealed class CelesteAutoCutModule : EverestModule {
     public static CelesteAutoCutSettings Settings => (CelesteAutoCutSettings) Instance._Settings;
 
     private readonly ReplayController controller = new();
-    private readonly SuccessfulClearRecorder successfulClearRecorder;
     private readonly RoomClipRecorder roomClipRecorder;
     private readonly ObsAutoAssemblerLauncher obsAutoAssemblerLauncher;
-    private KeyboardState previousRawKeyboard;
     private bool obsAutoAssemblerStartPending;
     private bool observedLevelSceneLastFrame;
     private int obsAutoAssemblerReadyFrames;
@@ -24,7 +21,6 @@ public sealed class CelesteAutoCutModule : EverestModule {
 
     public CelesteAutoCutModule() {
         Instance = this;
-        successfulClearRecorder = new SuccessfulClearRecorder(controller);
         roomClipRecorder = new RoomClipRecorder(controller);
         obsAutoAssemblerLauncher = new ObsAutoAssemblerLauncher(controller);
     }
@@ -43,24 +39,18 @@ public sealed class CelesteAutoCutModule : EverestModule {
         On.Celeste.Strawberry.OnCollect -= OnStrawberryCollect;
         Everest.Events.Player.OnDie -= OnPlayerDie;
         controller.Stop();
-        successfulClearRecorder.Stop(discard: true);
         roomClipRecorder.Shutdown();
         obsAutoAssemblerLauncher.Stop();
     }
 
     private void OnPlayerDie(Player player) {
-        if (Settings.Enabled) {
-            successfulClearRecorder.OnDeath();
-            roomClipRecorder.OnDeath(player);
-        }
+        roomClipRecorder.OnDeath(player);
     }
 
     private void OnStrawberryCollect(On.Celeste.Strawberry.orig_OnCollect orig, Strawberry self) {
         orig(self);
 
-        if (Settings.Enabled) {
-            roomClipRecorder.OnStrawberryCollect(self);
-        }
+        roomClipRecorder.OnStrawberryCollect(self);
     }
 
     private void OnMInputUpdate(On.Monocle.MInput.orig_Update orig) {
@@ -78,37 +68,14 @@ public sealed class CelesteAutoCutModule : EverestModule {
             }
         }
 
-        if (!Settings.Enabled) {
-            return;
-        }
-
-        HandleHotkeys();
-
-        if (controller.Mode == ReplayMode.Playing) {
-            controller.PlaybackFrame();
-        } else if (controller.Mode == ReplayMode.Recording) {
-            controller.RecordFrame();
-        }
-
-        successfulClearRecorder.RecordFrame();
         ObserveSceneExit();
     }
 
     private void OnLevelUpdate(On.Celeste.Level.orig_Update orig, Level self) {
         orig(self);
 
-        if (!Settings.Enabled) {
-            return;
-        }
-
         bool chapterComplete = RuntimeLevelState.IsChapterComplete(self);
         roomClipRecorder.ObserveLevel(self, chapterComplete);
-        successfulClearRecorder.ObserveLevel(self, chapterComplete);
-
-        if (Settings.AutoRecordOnLevelStart && controller.Mode == ReplayMode.Idle && !observedLevelSceneLastFrame) {
-            controller.StartRecording();
-        }
-
         observedLevelSceneLastFrame = true;
         roomClipRecorder.TickFrame();
     }
@@ -116,42 +83,8 @@ public sealed class CelesteAutoCutModule : EverestModule {
     private void ObserveSceneExit() {
         if (observedLevelSceneLastFrame && Engine.Scene is not Level) {
             roomClipRecorder.ObserveExitedLevel("scene_changed");
-            successfulClearRecorder.ObserveExitedLevel();
             observedLevelSceneLastFrame = false;
         }
-    }
-
-    private void HandleHotkeys() {
-        KeyboardState current = Keyboard.GetState();
-
-        if (Pressed(current, Settings.StopKey)) {
-            controller.Stop();
-        } else if (Pressed(current, Settings.ToggleRecordingKey)) {
-            controller.ToggleRecording();
-        } else if (Pressed(current, Settings.PlayKey)) {
-            controller.StartPlayback();
-        }
-
-        previousRawKeyboard = current;
-    }
-
-    private bool Pressed(KeyboardState current, Keys key) {
-        return key != Keys.None && current.IsKeyDown(key) && !previousRawKeyboard.IsKeyDown(key);
-    }
-
-    [Command("replay_record", "Start or stop CelesteAutoCut recording.")]
-    private static void CommandRecord() {
-        Instance.controller.ToggleRecording();
-    }
-
-    [Command("replay_play", "Play the configured CelesteAutoCut replay file.")]
-    private static void CommandPlay() {
-        Instance.controller.StartPlayback();
-    }
-
-    [Command("replay_stop", "Stop CelesteAutoCut recording or playback.")]
-    private static void CommandStop() {
-        Instance.controller.Stop();
     }
 
     [Command("replay_room_clip_reset", "Delete CelesteAutoCut room clip event logs.")]

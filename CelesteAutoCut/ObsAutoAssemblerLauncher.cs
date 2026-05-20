@@ -9,6 +9,9 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class ObsAutoAssemblerLauncher {
     private const string Tag = "CelesteAutoCut";
+    private const string HelperRelativePath = "ObsClipPanel\\ObsClipPanel.exe";
+    private const string WorkingDirectoryName = "obs_auto";
+    private const string RoomEventsFileName = "room_events.jsonl";
     private readonly ReplayController replayController;
     private readonly object gate = new();
     private Process? process;
@@ -22,7 +25,7 @@ internal sealed class ObsAutoAssemblerLauncher {
 
     public void Start() {
         lock (gate) {
-            if (!CelesteAutoCutModule.Settings.EnableObsAutoAssembler || process is { HasExited: false } || startTask is { IsCompleted: false }) {
+            if (process is { HasExited: false } || startTask is { IsCompleted: false }) {
                 return;
             }
 
@@ -62,7 +65,7 @@ internal sealed class ObsAutoAssemblerLauncher {
 
             string workingDir = ResolveWorkingDirectory();
             Directory.CreateDirectory(workingDir);
-            string roomEventsPath = Path.Combine(replayController.ReplayDirectory, SafeRelativeFileName(CelesteAutoCutModule.Settings.RoomClipEventFileName, "room_events.jsonl"));
+            string roomEventsPath = Path.Combine(replayController.ReplayDirectory, RoomEventsFileName);
             string stdoutPath = Path.Combine(workingDir, "obs-auto-stdout.log");
             string stderrPath = Path.Combine(workingDir, "obs-auto-stderr.log");
 
@@ -81,8 +84,8 @@ internal sealed class ObsAutoAssemblerLauncher {
             startInfo.Environment["CELESTE_REPLAY_REQUIRE_EXISTING_FILES"] = "true";
             startInfo.Environment["CELESTE_REPLAY_PARENT_PID"] = Environment.ProcessId.ToString();
             startInfo.Environment["CELESTE_REPLAY_PARENT_START_TICKS"] = Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks.ToString();
-            if (!string.IsNullOrWhiteSpace(CelesteAutoCutModule.Settings.ObsAutoAssemblerFfmpegPath)) {
-                startInfo.Environment["CELESTE_REPLAY_FFMPEG_PATH"] = CelesteAutoCutModule.Settings.ObsAutoAssemblerFfmpegPath;
+            if (!string.IsNullOrWhiteSpace(CelesteAutoCutModule.Settings.OutputDirectory)) {
+                startInfo.Environment["CELESTE_REPLAY_OUTPUT_DIRECTORY"] = CelesteAutoCutModule.Settings.OutputDirectory;
             }
 
             var startedProcess = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -115,7 +118,6 @@ internal sealed class ObsAutoAssemblerLauncher {
 
             _ = PumpOutputAsync(startedProcess.StandardOutput, stdoutPath);
             _ = PumpOutputAsync(startedProcess.StandardError, stderrPath);
-            Log($"Started OBS auto-assembler helper in background: {helperPath}");
         } catch (Exception e) {
             Log($"Failed to start OBS auto-assembler helper: {e}", LogLevel.Error);
         } finally {
@@ -165,30 +167,12 @@ internal sealed class ObsAutoAssemblerLauncher {
         }
     }
 
-    private static string SafeRelativeFileName(string? fileName, string fallback) {
-        if (string.IsNullOrWhiteSpace(fileName)) {
-            fileName = fallback;
-        }
-
-        fileName = Path.GetFileName(fileName);
-        foreach (char c in Path.GetInvalidFileNameChars()) {
-            fileName = fileName.Replace(c, '_');
-        }
-
-        return string.IsNullOrWhiteSpace(fileName) ? fallback : fileName;
-    }
-
     private static string ResolveHelperPath() {
-        string relative = CelesteAutoCutModule.Settings.ObsAutoAssemblerRelativePath;
-        return BundledObsHelper.ResolveHelperPath(relative);
+        return BundledObsHelper.ResolveHelperPath(HelperRelativePath);
     }
 
     private string ResolveWorkingDirectory() {
-        string name = CelesteAutoCutModule.Settings.ObsAutoAssemblerWorkingDirectoryName;
-        if (string.IsNullOrWhiteSpace(name)) {
-            name = "obs_auto";
-        }
-        return Path.Combine(replayController.ReplayDirectory, Path.GetFileName(name));
+        return Path.Combine(replayController.ReplayDirectory, WorkingDirectoryName);
     }
 
     private static void Log(string message, LogLevel level = LogLevel.Info) {

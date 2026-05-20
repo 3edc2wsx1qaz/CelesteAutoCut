@@ -77,12 +77,15 @@
     <ItemGroup>
       <PublishedFiles Include="$(PublishDir)**\*.*" />
       <RootPackageFiles Include="$(ModRootDir)everest.yaml;$(ModRootDir)README.md" />
+      <DialogPackageFiles Include="$(ModRootDir)Dialog\**\*.txt" />
     </ItemGroup>
 
     <Copy SourceFiles="@(PublishedFiles)"
           DestinationFiles="@(PublishedFiles->'$(ModPackageStageDir)bin\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="@(RootPackageFiles)"
           DestinationFiles="@(RootPackageFiles->'$(ModPackageStageDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(DialogPackageFiles)"
+          DestinationFiles="@(DialogPackageFiles->'$(ModPackageStageDir)Dialog\%(RecursiveDir)%(Filename)%(Extension)')" />
 
     <ItemGroup>
       <FilesToPackage Include="$(ModPackageStageDir)**\*.*" />

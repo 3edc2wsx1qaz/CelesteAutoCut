@@ -30,6 +30,7 @@ public static class SelfTests
             ("backtrack bounce is not suppressed", BacktrackBounceIsNotSuppressed),
             ("branch return to hub room is kept", BranchReturnToHubRoomIsKept),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
+            ("postroll at recording end is clamped", PostrollAtRecordingEndIsClamped),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
             ("invalid anchor gaps are reported", InvalidAnchorGap),
             ("manifest builder reconstructs recording and split files", ManifestBuilderReconstructsRecording),
@@ -618,6 +619,23 @@ public static class SelfTests
         var recording = Recording("r", BaseUtc, [new RecordingFileManifest { Path = "too-short.mp4", StartDurationMs = 0, EndDurationMs = 2_000 }]);
         var doc = Generate(StandardRoomEvents(BaseUtc.AddSeconds(1), endOffsetSeconds: 3), new SessionManifest { SessionId = "s", Recordings = [recording] });
         Assert(doc.InvalidClips.Any(c => c.Reasons.Contains("source_file_mapping_gap")), "mapping gap reason missing");
+    }
+
+    private static void PostrollAtRecordingEndIsClamped()
+    {
+        var recording = Recording("r", BaseUtc, "run.mp4", 0, 3_000);
+        var doc = Generate(StandardRoomEvents(BaseUtc, endOffsetSeconds: 3), new SessionManifest { SessionId = "s", Recordings = [recording] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 500,
+            MaxAllowedAnchorGapMs = 1_500,
+            RequireExistingFiles = false
+        });
+
+        Assert(doc.InvalidClips.Count == 0, "postroll-only overrun should not invalidate final clip");
+        var finalClip = doc.Clips.SingleOrDefault(c => c.Reasons.Contains("end_postroll_clamped_to_recording_end"));
+        Assert(finalClip is not null, "expected a valid clamped final clip");
+        Assert(finalClip!.EndOutputDurationMs == 3_000, "clip end should clamp to recording file end");
     }
 
     private static void InvalidAnchorGap()

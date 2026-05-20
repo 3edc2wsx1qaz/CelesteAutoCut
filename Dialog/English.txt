@@ -1,0 +1,3 @@
+﻿MODOPTIONS_CELESTEAUTOCUT_TITLE=Celeste Auto Cut
+MODOPTIONS_CELESTEAUTOCUT_OutputDirectory=Output Directory
+MODOPTIONS_CELESTEAUTOCUT_OutputDirectory_DESCRIPTION=Root directory for final clipped videos. Leave empty to use the OBS recording folder. Map-name subfolders are still created.

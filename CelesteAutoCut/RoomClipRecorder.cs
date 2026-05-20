@@ -10,6 +10,8 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 15;
+    private const string EventLogFileName = "room_events.jsonl";
+    private const string StatusFileName = "room_clip_session.json";
     private readonly ReplayController replayController;
     private readonly JsonSerializerOptions jsonOptions = new() {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -40,15 +42,11 @@ internal sealed class RoomClipRecorder {
         this.replayController = replayController;
     }
 
-    public string EventLogPath => Path.Combine(replayController.ReplayDirectory, SafeFileName(CelesteAutoCutModule.Settings.RoomClipEventFileName, "room_events.jsonl"));
-    public string StatusPath => Path.Combine(replayController.ReplayDirectory, SafeFileName(CelesteAutoCutModule.Settings.RoomClipStatusFileName, "room_clip_session.json"));
+    public string EventLogPath => Path.Combine(replayController.ReplayDirectory, EventLogFileName);
+    public string StatusPath => Path.Combine(replayController.ReplayDirectory, StatusFileName);
     public bool Active => active;
 
     public void Start(Session session, bool fromSaveData) {
-        if (!CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
-            return;
-        }
-
         if (active) {
             Stop("restart", discard: false);
         }
@@ -92,10 +90,6 @@ internal sealed class RoomClipRecorder {
     }
 
     public void ObserveLevel(Level level, bool chapterComplete) {
-        if (!CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
-            return;
-        }
-
         Session session = level.Session;
         string observedRoom = session.Level ?? string.Empty;
         if (!active || !ReferenceEquals(observedSession, session)) {
@@ -150,7 +144,7 @@ internal sealed class RoomClipRecorder {
     }
 
     public void OnDeath(Player player) {
-        if (!active || !CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
+        if (!active) {
             return;
         }
 
@@ -163,7 +157,7 @@ internal sealed class RoomClipRecorder {
     }
 
     public void OnStrawberryCollect(Strawberry strawberry) {
-        if (!active || !CelesteAutoCutModule.Settings.EnableRoomClipRecorder) {
+        if (!active) {
             return;
         }
 

@@ -8,7 +8,7 @@ CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** �
 2. 在 OBS 中开始录制（推荐 `.mkv`）。
 3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
 
-当前版本重点修复：剪辑区间改为按时间顺序单次线性扫描事件；首房间不会再被初始 `load_level` 截掉；每次 `room_enter -> load_level` 都会作为进房片段保留，若它没有和后续 `load_level -> ...` 连续合并，会在 `load_level` 后额外保留一小段 delay；死亡后的成功片段只从后续同房间 `load_level` 接到 `transition`、`strawberry_collect` 或 `level_complete`，且 `load_level(playerIntro=Respawn)` 起点不会应用 pre-roll，避免把死亡前画面卷进来；`level_complete -> exit` 也会保留；草莓房会记录 `strawberry_collect`，拿到草莓这一刻就算本次尝试成功，并继续保留 `strawberry_collect -> first room_enter/exit`，中间即使发生 `death` 也不会截断这段尾巴；时间首尾相连的候选区间会先合并再交给 ffmpeg，避免 1ms 转场片段生成音频-only segment；一次录制跨多个地图时会按地图分别输出到对应地图名文件夹；折返抑制已移除，`A -> B -> A -> B` 这类路线会按普通房间事件处理；低资源模式默认开启，即使旧配置里曾打开成功通关逐帧输入记录，也不会影响 OBS 自动剪辑的低 CPU/内存路径。
+当前版本重点修复：剪辑区间改为按时间顺序单次线性扫描事件；首房间不会再被初始 `load_level` 截掉；每次 `room_enter -> load_level` 都会作为进房片段保留，若它没有和后续 `load_level -> ...` 连续合并，会在 `load_level` 后额外保留一小段 delay；死亡后的成功片段只从后续同房间 `load_level` 接到 `transition`、`strawberry_collect` 或 `level_complete`，且 `load_level(playerIntro=Respawn)` 起点不会应用 pre-roll，避免把死亡前画面卷进来；`level_complete -> exit` 也会保留；草莓房会记录 `strawberry_collect`，拿到草莓这一刻就算本次尝试成功，并继续保留 `strawberry_collect -> first room_enter/exit`，中间即使发生 `death` 也不会截断这段尾巴；时间首尾相连的候选区间会先合并再交给 ffmpeg，避免 1ms 转场片段生成音频-only segment；一次录制跨多个地图时会按地图分别输出到对应地图名文件夹；折返抑制已移除，`A -> B -> A -> B` 这类路线会按普通房间事件处理；旧的输入录制/回放热键和逐帧成功通关导出已移除，游戏内 Mod Options 只保留最终视频输出根目录。
 
 ---
 
@@ -36,6 +36,16 @@ D:\Steam\steamapps\common\Celeste\Mods\CelesteAutoCut.zip
 
 ---
 
+## 游戏内 Mod Options
+
+当前游戏内设置页只保留一个选项：
+
+- `Output Directory` / `输出目录`：最终剪辑视频的输出根目录。留空时使用 OBS 录制目录；填写后，每张地图仍会输出到该目录下对应地图名子文件夹。
+
+旧的 `F5/F6/F7` 输入录制/回放热键、逐帧成功通关导出、内部 helper 路径等选项已经从 Mod Options 移除，避免设置页被长文本撑偏。
+
+---
+
 ## 输出位置与命名
 
 最终视频默认使用 **录制开始的本地时间** 命名，格式为：
@@ -52,9 +62,10 @@ yyyy-MM-dd HH-mm-ss.mp4
 
 输出目录优先级：
 
-1. 本次 OBS 实际录制文件所在目录；
-2. OBS 当前配置的默认录制目录；
-3. helper 工作目录（兜底）。
+1. 游戏内 Mod Options 的 `Output Directory` / `输出目录`（留空则跳过）；
+2. 本次 OBS 实际录制文件所在目录；
+3. OBS 当前配置的默认录制目录；
+4. helper 工作目录（兜底）。
 
 最终视频会写入上述目录下的 **地图名子文件夹**，文件夹名取地图 SID 的最后一段，并清理为合法文件名。例如：
 
@@ -104,14 +115,10 @@ helper 工作目录：
 
 ## 当前默认性能策略
 
-- `EnableRoomClipRecorder = true`：保留房间事件，用于 OBS 自动剪辑。
-- `EnableObsAutoAssembler = true`：启动内置 OBS helper。
-- `LowResourceMode = true`：默认跳过旧的成功通关逐帧输入导出，降低 CPU/内存占用；不影响 OBS 自动剪辑。
-- `AutoExportSuccessfulClearRecords = false`：默认关闭逐帧输入记录；在低资源模式开启时，即使旧配置保留为 `true` 也不会采集逐帧输入。
-- OBS helper 默认轮询间隔提高到 `1000ms`，减少后台 CPU 占用。
+- 房间事件记录和内置 OBS helper 作为自动剪辑核心路径始终启用。
+- 旧的输入录制/回放、`F5/F6/F7` 热键、成功通关逐帧输入导出已经移除，不再占用 CPU/内存，也不会出现在 Mod Options。
+- OBS helper 默认轮询间隔为 `1000ms`，减少后台 CPU 占用。
 - 正常运行的 Info 级日志不再刷 Celeste 控制台；只保留警告、错误和手动命令输出。
-
-说明：`LowResourceMode` / `AutoExportSuccessfulClearRecords` 只影响额外导出的逐帧输入 JSON，不影响最终视频自动剪辑。
 
 ---
 
@@ -137,6 +144,7 @@ helper 工作目录：
 - 若成功片段从 `load_level(playerIntro=Respawn)` 开始，该片段起点不会应用 pre-roll，会直接从人物加载完毕的时间点开始，避免死亡前画面残留；
 - 不符合上述模式的事件不会生成片段，诊断会写入 `clip_intervals.json` 的 `warnings`，不会刷 Celeste 控制台；
 - 事件时间上首尾相连且属于同一地图的候选区间会合并成一个 `merged_linear_interval`，不会删除 1ms 这类过短候选；这样既保留转场时间，又避免 ffmpeg 生成只有音频没有视频帧的超短 segment；
+- 如果最后一个保留片段的 `post-roll` 超出 OBS 实际录制文件尾，生成区间时会夹到录制文件末尾；只有事件本身已经超出录制文件时才继续标记为 `source_file_mapping_gap`。
 - 如果 `room_enter -> load_level` 没有和后续成功区间时间连续合并，会在 `load_level` 后应用一次 `PostRollMs` delay，原因标记为 `room_entry_load_delay`，避免进房片段刚加载完就硬切；
 - 折返抑制已取消：`A -> B -> A -> B`、支路返回、同名房间再进入都按同一套线性事件规则处理。
 
@@ -183,7 +191,7 @@ D:\Steam\steamapps\common\Celeste\Mods
 
 ### 3. 控制台出现大量失败尝试日志
 
-当前版本已移除 `Discarded failed checkpoint attempt` 这类正常失败尝试日志，并通过默认开启的 `LowResourceMode` 跳过对应的逐帧输入记录功能；房间事件重置、成功通关辅助记录、helper 正常退出等非错误路径也不再向控制台输出常规日志。
+当前版本已移除 `Discarded failed checkpoint attempt` 这类正常失败尝试日志；旧的成功通关逐帧输入记录功能也已删除。房间事件重置、helper 正常退出等非错误路径不再向控制台输出常规日志。
 
 ---
 
