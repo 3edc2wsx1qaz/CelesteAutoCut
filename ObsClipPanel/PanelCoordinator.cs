@@ -703,7 +703,7 @@ public sealed class PanelCoordinator : BackgroundService
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(path, string.Empty);
+        AppendOnlyJsonl.Clear(path);
     }
 
     private static void WriteClipSelectionLog(SessionPaths paths, string sessionId, ClipIntervalsDocument intervals)

@@ -1,10 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "q7YqsnNZ92U=",
+  "dgSpecHash": "AU7n6MwpZ5g=",
   "success": true,
   "projectFilePath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\CelesteAutoCut\\CelesteAutoCut.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\18254\\.nuget\\packages\\bepinex.assemblypublicizer.msbuild\\0.4.1\\bepinex.assemblypublicizer.msbuild.0.4.1.nupkg.sha512"
+    "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\.dotnet_home\\.nuget\\packages\\bepinex.assemblypublicizer.msbuild\\0.4.1\\bepinex.assemblypublicizer.msbuild.0.4.1.nupkg.sha512"
   ],
   "logs": []
 }

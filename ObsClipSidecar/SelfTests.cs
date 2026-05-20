@@ -42,6 +42,7 @@ public static class SelfTests
             ("manifest builder honors record_file_changed newOutputPath", ManifestBuilderUsesNewOutputPath),
             ("manifest builder waits for terminal stop path after stopping transition", ManifestBuilderWaitsForTerminalStopPath),
             ("json reader is case insensitive for mod output", CaseInsensitiveJsonRead),
+            ("jsonl room events tolerate shared read write access", JsonlRoomEventsUseSharedAccess),
             ("assembly plan defaults to precise mode", AssemblyDefaultsToPrecise),
             ("assembly groups one recording into per-map outputs", AssemblyGroupsOneRecordingIntoPerMapOutputs),
             ("assembly disambiguates colliding map outputs", AssemblyDisambiguatesCollidingMapOutputs)
@@ -872,6 +873,53 @@ public static class SelfTests
             var parsed = AppendOnlyJsonl.ReadAll<RoomEvent>(path);
             Assert(parsed.Count == 1, "expected one parsed room event");
             Assert(parsed[0].EventType == "room_enter", "event type should parse from PascalCase JSON");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    private static void JsonlRoomEventsUseSharedAccess()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "obs-clip-sidecar-selftest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var path = Path.Combine(tempDir, "room_events.jsonl");
+            File.WriteAllText(path, "{\"schemaVersion\":1,\"eventType\":\"room_enter\",\"utc\":\"2026-05-18T00:00:00Z\",\"room\":\"a\"}" + Environment.NewLine, Encoding.UTF8);
+
+            using (var writerHandle = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            {
+                var parsed = AppendOnlyJsonl.ReadAll<RoomEvent>(path);
+                Assert(parsed.Count == 1, "reader should not be blocked by an active shared writer");
+
+                AppendOnlyJsonl.Clear(path);
+                Assert(new FileInfo(path).Length == 0, "clear should truncate even while an active shared writer exists");
+            }
+
+            AppendOnlyJsonl.AppendAsync(path, new RoomEvent
+            {
+                SchemaVersion = 1,
+                EventType = "room_enter",
+                Utc = BaseUtc,
+                Room = "b"
+            }).GetAwaiter().GetResult();
+
+            using (var readerHandle = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                AppendOnlyJsonl.AppendAsync(path, new RoomEvent
+                {
+                    SchemaVersion = 1,
+                    EventType = "load_level",
+                    Utc = BaseUtc.AddMilliseconds(1),
+                    Room = "b"
+                }).GetAwaiter().GetResult();
+            }
+
+            var final = AppendOnlyJsonl.ReadAll<RoomEvent>(path);
+            Assert(final.Count == 2, "writer should not be blocked by an active shared reader");
+            Assert(final[0].Room == "b" && final[1].EventType == "load_level", "events should remain readable after shared access operations");
         }
         finally
         {

@@ -18,16 +18,25 @@ public static class AppendOnlyJsonl
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".");
         var line = JsonSerializer.Serialize(value, LineOptions);
-        await using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+        await using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
         await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
         await writer.WriteLineAsync(line.AsMemory(), cancellationToken);
+    }
+
+    public static void Clear(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".");
+        using var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
+        stream.SetLength(0);
     }
 
     public static List<T> ReadAll<T>(string path)
     {
         var items = new List<T>();
         var lineNumber = 0;
-        foreach (var line in File.ReadLines(path))
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        while (reader.ReadLine() is { } line)
         {
             lineNumber++;
             if (string.IsNullOrWhiteSpace(line))

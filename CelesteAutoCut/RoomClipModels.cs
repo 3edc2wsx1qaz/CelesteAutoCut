@@ -6,7 +6,8 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 public sealed class RoomClipEvent {
     public int SchemaVersion { get; set; } = 1;
-    public string EventId { get; set; } = Guid.NewGuid().ToString("N");
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EventId { get; set; }
     public string EventType { get; set; } = string.Empty;
     public string Utc { get; set; } = DateTime.UtcNow.ToString("O");
     public string SessionId { get; set; } = string.Empty;
@@ -18,7 +19,8 @@ public sealed class RoomClipEvent {
     public string? NextRoom { get; set; }
     public long? ChapterTimeMs { get; set; }
     public long GameFrame { get; set; }
-    public Dictionary<string, string?> Notes { get; set; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string?>? Notes { get; set; }
 }
 
 public sealed class RoomClipSessionStatus {
