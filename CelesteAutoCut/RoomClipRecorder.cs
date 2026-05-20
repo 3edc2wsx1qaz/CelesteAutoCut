@@ -12,7 +12,7 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 60;
-    private const long PlayerPositionSampleIntervalFrames = 10;
+    private const long PlayerPositionSampleIntervalFrames = 20;
     private const long PlayerPositionSampleWindowFrames = 480;
     private const string EventLogFileName = "room_events.jsonl";
     private const string StatusFileName = "room_clip_session.json";
@@ -45,6 +45,9 @@ internal sealed class RoomClipRecorder {
     private Vector2? playerPositionSampleSpawnPoint;
     private long playerPositionSampleUntilFrame = long.MinValue;
     private long lastPlayerPositionSampleFrame = long.MinValue;
+    private RoomClipEvent? bestPlayerPositionSampleEvent;
+    private bool bestPlayerPositionSampleIsStationary;
+    private double bestPlayerPositionSampleDistanceSquared = double.MaxValue;
 
     public RoomClipRecorder(ReplayController replayController) {
         this.replayController = replayController;
@@ -102,6 +105,7 @@ internal sealed class RoomClipRecorder {
         }
 
         if (!string.Equals(lastObservedRoom, observedRoom, StringComparison.Ordinal)) {
+            FlushPlayerPositionSample();
             string fromRoom = currentRoomOr(lastObservedRoom);
             WriteEvent(RoomClipEventTypes.Transition, fromRoom, observedRoom);
 
@@ -128,6 +132,7 @@ internal sealed class RoomClipRecorder {
             return;
         }
 
+        FlushPlayerPositionSample();
         WriteEvent(RoomClipEventTypes.Exit, currentRoom);
         ClearPlayerPositionSampling();
         Stop(reason, discard: false);
@@ -139,6 +144,7 @@ internal sealed class RoomClipRecorder {
             return;
         }
 
+        FlushPlayerPositionSample();
         WriteEvent(RoomClipEventTypes.Death, currentRoomOr(player.SceneAs<Level>()?.Session.Level));
         ClearPlayerPositionSampling();
         attemptId = Guid.NewGuid().ToString("N");
@@ -221,6 +227,7 @@ internal sealed class RoomClipRecorder {
         }
 
         if (!discard) {
+            FlushPlayerPositionSample();
             WriteEvent(RoomClipEventTypes.SessionEnd, currentRoom, notes: new Dictionary<string, string?> {
                 ["reason"] = reason
             });
@@ -279,6 +286,7 @@ internal sealed class RoomClipRecorder {
 
     private void SchedulePlayerPositionSampling(RoomClipEvent loadEvent, string room, Vector2? spawnPoint) {
         if (!spawnPoint.HasValue) {
+            FlushPlayerPositionSample();
             ClearPlayerPositionSampling();
             return;
         }
@@ -288,6 +296,9 @@ internal sealed class RoomClipRecorder {
         playerPositionSampleSpawnPoint = spawnPoint;
         playerPositionSampleUntilFrame = gameFrame + PlayerPositionSampleWindowFrames;
         lastPlayerPositionSampleFrame = long.MinValue;
+        bestPlayerPositionSampleEvent = null;
+        bestPlayerPositionSampleIsStationary = false;
+        bestPlayerPositionSampleDistanceSquared = double.MaxValue;
     }
 
     private void ObservePlayerPositionSample(Level? level) {
@@ -298,6 +309,7 @@ internal sealed class RoomClipRecorder {
         }
 
         if (gameFrame > playerPositionSampleUntilFrame) {
+            FlushPlayerPositionSample();
             ClearPlayerPositionSampling();
             return;
         }
@@ -310,6 +322,7 @@ internal sealed class RoomClipRecorder {
         var session = level.Session;
         var room = session.Level ?? string.Empty;
         if (!string.Equals(room, playerPositionSampleRoom ?? string.Empty, StringComparison.Ordinal)) {
+            FlushPlayerPositionSample();
             ClearPlayerPositionSampling();
             return;
         }
@@ -321,13 +334,21 @@ internal sealed class RoomClipRecorder {
 
         var spawnPoint = playerPositionSampleSpawnPoint.Value;
         lastPlayerPositionSampleFrame = gameFrame;
-        WriteEvent(RoomClipEventTypes.PlayerPositionSample, room, notes: new Dictionary<string, string?> {
+        var distanceSquared = DistanceSquared(player.Position, spawnPoint);
+        bool isStationary = player.Speed.LengthSquared() <= 0.0001f;
+        if (!IsBetterPlayerPositionSample(isStationary, distanceSquared)) {
+            return;
+        }
+
+        bestPlayerPositionSampleIsStationary = isStationary;
+        bestPlayerPositionSampleDistanceSquared = distanceSquared;
+        bestPlayerPositionSampleEvent = CreateEvent(RoomClipEventTypes.PlayerPositionSample, room, notes: new Dictionary<string, string?> {
             ["loadEventId"] = playerPositionSampleLoadEventId,
             ["x"] = player.Position.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["y"] = player.Position.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["spawnPointX"] = spawnPoint.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["spawnPointY"] = spawnPoint.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
-        }, updateStatus: false);
+        });
     }
 
     private void ClearPlayerPositionSampling() {
@@ -336,11 +357,25 @@ internal sealed class RoomClipRecorder {
         playerPositionSampleSpawnPoint = null;
         playerPositionSampleUntilFrame = long.MinValue;
         lastPlayerPositionSampleFrame = long.MinValue;
+        bestPlayerPositionSampleEvent = null;
+        bestPlayerPositionSampleIsStationary = false;
+        bestPlayerPositionSampleDistanceSquared = double.MaxValue;
     }
 
     private RoomClipEvent WriteEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null, bool updateStatus = true) {
+        var entry = CreateEvent(eventType, room, nextRoom, notes);
+        AppendEvent(entry);
+        if (updateStatus) {
+            statusDirty = true;
+            WriteStatus(force: true);
+        }
+
+        return entry;
+    }
+
+    private RoomClipEvent CreateEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null) {
         Directory.CreateDirectory(replayController.ReplayDirectory);
-        var entry = new RoomClipEvent {
+        return new RoomClipEvent {
             EventType = eventType,
             EventId = eventType == RoomClipEventTypes.LoadLevel ? Guid.NewGuid().ToString("N") : null,
             Utc = DateTime.UtcNow.ToString("O"),
@@ -355,17 +390,14 @@ internal sealed class RoomClipRecorder {
             GameFrame = gameFrame,
             Notes = CompactNotes(notes)
         };
+    }
 
+    private void AppendEvent(RoomClipEvent entry) {
+        Directory.CreateDirectory(replayController.ReplayDirectory);
         using (var stream = new FileStream(EventLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
         using (var writer = new StreamWriter(stream)) {
             writer.WriteLine(JsonSerializer.Serialize(entry, jsonOptions));
         }
-        if (updateStatus) {
-            statusDirty = true;
-            WriteStatus(force: true);
-        }
-
-        return entry;
     }
 
     private void WriteStatus(bool force = false) {
@@ -433,6 +465,33 @@ internal sealed class RoomClipRecorder {
         }
 
         return notes.Count == 0 ? null : notes;
+    }
+
+    private bool IsBetterPlayerPositionSample(bool isStationary, double distanceSquared) {
+        if (bestPlayerPositionSampleEvent is null) {
+            return true;
+        }
+
+        if (isStationary != bestPlayerPositionSampleIsStationary) {
+            return isStationary;
+        }
+
+        return distanceSquared < bestPlayerPositionSampleDistanceSquared;
+    }
+
+    private void FlushPlayerPositionSample() {
+        if (bestPlayerPositionSampleEvent is null) {
+            return;
+        }
+
+        AppendEvent(bestPlayerPositionSampleEvent);
+        bestPlayerPositionSampleEvent = null;
+    }
+
+    private static double DistanceSquared(Vector2 left, Vector2 right) {
+        double dx = left.X - right.X;
+        double dy = left.Y - right.Y;
+        return (dx * dx) + (dy * dy);
     }
 
     private static string SafeFileName(string? fileName, string fallback) {
