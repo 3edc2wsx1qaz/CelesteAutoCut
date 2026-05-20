@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using ObsClipSidecar;
 
@@ -66,6 +67,7 @@ public sealed class PanelCoordinator : BackgroundService
             if (File.Exists(paths.ObsEventsPath)) File.Delete(paths.ObsEventsPath);
             if (File.Exists(paths.SessionManifestPath)) File.Delete(paths.SessionManifestPath);
             if (File.Exists(paths.ClipIntervalsPath)) File.Delete(paths.ClipIntervalsPath);
+            DeleteClipSelectionLogs(paths);
             if (Directory.Exists(paths.AssemblyDirectory)) Directory.Delete(paths.AssemblyDirectory, recursive: true);
             UpdateStatus(s => s with
             {
@@ -186,6 +188,7 @@ public sealed class PanelCoordinator : BackgroundService
                 RequireExistingFiles = settings.RequireExistingFiles
             });
             JsonFile.Write(paths.ClipIntervalsPath, intervals);
+            WriteClipSelectionLog(paths, currentSessionId, intervals);
 
             var recordingOutputPath = manifest.Recordings
                 .SelectMany(r => r.Files)
@@ -546,6 +549,7 @@ public sealed class PanelCoordinator : BackgroundService
             if (File.Exists(paths.ObsEventsPath)) File.Delete(paths.ObsEventsPath);
             if (File.Exists(paths.SessionManifestPath)) File.Delete(paths.SessionManifestPath);
             if (File.Exists(paths.ClipIntervalsPath)) File.Delete(paths.ClipIntervalsPath);
+            DeleteClipSelectionLogs(paths);
             if (Directory.Exists(paths.AssemblyDirectory)) Directory.Delete(paths.AssemblyDirectory, recursive: true);
             Directory.CreateDirectory(paths.AssemblyDirectory);
             recordingSessionActive = true;
@@ -702,6 +706,88 @@ public sealed class PanelCoordinator : BackgroundService
         File.WriteAllText(path, string.Empty);
     }
 
+    private static void WriteClipSelectionLog(SessionPaths paths, string sessionId, ClipIntervalsDocument intervals)
+    {
+        Directory.CreateDirectory(paths.SessionDirectory);
+        var generatedAtUtc = DateTimeOffset.UtcNow;
+        var document = new
+        {
+            schemaVersion = 1,
+            sessionId,
+            generatedAtUtc,
+            validClipCount = intervals.Clips.Count,
+            invalidClipCount = intervals.InvalidClips.Count,
+            warnings = intervals.Warnings,
+            clips = intervals.Clips.Select(ToClipSelectionEntry).ToList(),
+            invalidClips = intervals.InvalidClips.Select(ToClipSelectionEntry).ToList()
+        };
+        JsonFile.Write(Path.Combine(paths.SessionDirectory, "selected_clips.json"), document);
+
+        var text = new StringBuilder();
+        text.AppendLine($"sessionId={sessionId}");
+        text.AppendLine($"generatedAtUtc={generatedAtUtc:O}");
+        text.AppendLine($"validClipCount={intervals.Clips.Count}");
+        text.AppendLine($"invalidClipCount={intervals.InvalidClips.Count}");
+        text.AppendLine("kept:");
+        foreach (var clip in intervals.Clips)
+        {
+            text.AppendLine(FormatClipSelectionLine(clip));
+        }
+
+        if (intervals.InvalidClips.Count > 0)
+        {
+            text.AppendLine("invalid:");
+            foreach (var clip in intervals.InvalidClips)
+            {
+                text.AppendLine(FormatClipSelectionLine(clip));
+            }
+        }
+
+        if (intervals.Warnings.Count > 0)
+        {
+            text.AppendLine("warnings:");
+            foreach (var warning in intervals.Warnings)
+            {
+                text.AppendLine($"- {warning}");
+            }
+        }
+
+        File.WriteAllText(Path.Combine(paths.SessionDirectory, "selected_clips.log"), text.ToString());
+    }
+
+    private static void DeleteClipSelectionLogs(SessionPaths paths)
+    {
+        var jsonPath = Path.Combine(paths.SessionDirectory, "selected_clips.json");
+        var textPath = Path.Combine(paths.SessionDirectory, "selected_clips.log");
+        if (File.Exists(jsonPath)) File.Delete(jsonPath);
+        if (File.Exists(textPath)) File.Delete(textPath);
+    }
+
+    private static object ToClipSelectionEntry(ClipInterval clip) => new
+    {
+        clip.ClipId,
+        clip.Status,
+        clip.Room,
+        clip.MapSid,
+        clip.RecordingId,
+        clip.StartUtc,
+        clip.EndUtc,
+        clip.StartOutputDurationMs,
+        clip.EndOutputDurationMs,
+        durationMs = clip.EndOutputDurationMs - clip.StartOutputDurationMs,
+        clip.ErrorBoundMs,
+        clip.PausePolicy,
+        clip.Reasons,
+        clip.SourceFileMapping
+    };
+
+    private static string FormatClipSelectionLine(ClipInterval clip)
+        => $"- {clip.Status} {clip.ClipId} map={clip.MapSid ?? ""} room={clip.Room ?? ""} " +
+           $"utc={clip.StartUtc:O}->{clip.EndUtc:O} " +
+           $"mediaMs={clip.StartOutputDurationMs}->{clip.EndOutputDurationMs} " +
+           $"durationMs={clip.EndOutputDurationMs - clip.StartOutputDurationMs} " +
+           $"reasons={string.Join(",", clip.Reasons)}";
+
     private SessionPaths EnsureSessionPaths(string sessionId, PanelSettings settings, string? recordingOutputPath = null, DateTimeOffset? recordingStartUtc = null, string? mapSid = null)
     {
         EnsureWorkingDirectory(settings);
@@ -783,4 +869,3 @@ public sealed class PanelCoordinator : BackgroundService
     }
 
 }
-

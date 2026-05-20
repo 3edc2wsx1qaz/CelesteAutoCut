@@ -28,6 +28,7 @@ public sealed class CelesteAutoCutModule : EverestModule {
     public override void Load() {
         obsAutoAssemblerStartPending = true;
         On.Monocle.MInput.Update += OnMInputUpdate;
+        On.Celeste.Level.LoadLevel += OnLevelLoadLevel;
         On.Celeste.Level.Update += OnLevelUpdate;
         On.Celeste.Strawberry.OnCollect += OnStrawberryCollect;
         Everest.Events.Player.OnDie += OnPlayerDie;
@@ -35,12 +36,19 @@ public sealed class CelesteAutoCutModule : EverestModule {
 
     public override void Unload() {
         On.Monocle.MInput.Update -= OnMInputUpdate;
+        On.Celeste.Level.LoadLevel -= OnLevelLoadLevel;
         On.Celeste.Level.Update -= OnLevelUpdate;
         On.Celeste.Strawberry.OnCollect -= OnStrawberryCollect;
         Everest.Events.Player.OnDie -= OnPlayerDie;
         controller.Stop();
         roomClipRecorder.Shutdown();
         obsAutoAssemblerLauncher.Stop();
+    }
+
+    private void OnLevelLoadLevel(On.Celeste.Level.orig_LoadLevel orig, Level self, Player.IntroTypes playerIntro, bool isFromLoader) {
+        orig(self, playerIntro, isFromLoader);
+
+        roomClipRecorder.ObserveLoadLevel(self, playerIntro.ToString(), isFromLoader);
     }
 
     private void OnPlayerDie(Player player) {

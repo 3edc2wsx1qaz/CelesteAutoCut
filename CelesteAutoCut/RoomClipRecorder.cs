@@ -25,7 +25,6 @@ internal sealed class RoomClipRecorder {
     private bool active;
     private bool statusDirty;
     private bool pendingInitialLoadLevel;
-    private bool pendingRespawnLoadLevel;
     private bool chapterCompleteLogged;
     private string sessionId = string.Empty;
     private string attemptId = string.Empty;
@@ -64,7 +63,6 @@ internal sealed class RoomClipRecorder {
         currentRoom = session.Level ?? string.Empty;
         lastObservedRoom = currentRoom;
         pendingInitialLoadLevel = true;
-        pendingRespawnLoadLevel = false;
         chapterCompleteLogged = false;
         statusDirty = true;
         lastStatusWriteFrame = long.MinValue;
@@ -106,18 +104,15 @@ internal sealed class RoomClipRecorder {
             currentRoom = observedRoom;
             lastObservedRoom = observedRoom;
             attemptId = Guid.NewGuid().ToString("N");
-            pendingRespawnLoadLevel = false;
             chapterCompleteLogged = false;
 
             WriteEvent(RoomClipEventTypes.RoomEnter, currentRoom, notes: new Dictionary<string, string?> {
                 ["reason"] = "transition",
                 ["source"] = "observed_state"
             });
-            WriteLoadLevel(observedRoom, playerIntro: "Transition");
+            WriteLoadLevel(observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
         } else if (pendingInitialLoadLevel) {
-            WriteLoadLevel(observedRoom, playerIntro: "Transition");
-        } else if (pendingRespawnLoadLevel) {
-            WriteLoadLevel(observedRoom, playerIntro: "Respawn");
+            WriteLoadLevel(observedRoom, playerIntro: "Transition", isFromLoader: false, source: "observed_state");
         }
 
         if (chapterComplete && !chapterCompleteLogged) {
@@ -153,7 +148,24 @@ internal sealed class RoomClipRecorder {
             ["y"] = player.Position.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
         });
         attemptId = Guid.NewGuid().ToString("N");
-        pendingRespawnLoadLevel = true;
+    }
+
+    public void ObserveLoadLevel(Level level, string playerIntro, bool isFromLoader) {
+        if (!string.Equals(playerIntro, "Respawn", StringComparison.OrdinalIgnoreCase)) {
+            return;
+        }
+
+        Session session = level.Session;
+        if (!active || !ReferenceEquals(observedSession, session)) {
+            Start(session, fromSaveData: false);
+        }
+
+        string observedRoom = session.Level ?? string.Empty;
+        currentRoom = observedRoom;
+        lastObservedRoom = observedRoom;
+        observedSession = session;
+        pendingInitialLoadLevel = false;
+        WriteLoadLevel(observedRoom, playerIntro, isFromLoader, source: "level_load_hook");
     }
 
     public void OnStrawberryCollect(Strawberry strawberry) {
@@ -233,13 +245,12 @@ internal sealed class RoomClipRecorder {
         WriteStatus(force: true);
     }
 
-    private void WriteLoadLevel(string room, string playerIntro) {
+    private void WriteLoadLevel(string room, string playerIntro, bool isFromLoader, string source) {
         pendingInitialLoadLevel = false;
-        pendingRespawnLoadLevel = false;
         WriteEvent(RoomClipEventTypes.LoadLevel, room, notes: new Dictionary<string, string?> {
             ["playerIntro"] = playerIntro,
-            ["isFromLoader"] = "False",
-            ["source"] = "observed_state"
+            ["isFromLoader"] = isFromLoader.ToString(),
+            ["source"] = source
         });
     }
 
@@ -286,7 +297,6 @@ internal sealed class RoomClipRecorder {
         observedSession = null;
         lastObservedRoom = null;
         pendingInitialLoadLevel = false;
-        pendingRespawnLoadLevel = false;
         chapterCompleteLogged = false;
     }
 

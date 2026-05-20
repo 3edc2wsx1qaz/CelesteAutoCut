@@ -17,6 +17,8 @@ public static class SelfTests
             ("checkpoint lobby entered before recording still yields clip", CheckpointLobbyEnteredBeforeRecording),
             ("load level becomes attempt reset after failure", LoadLevelResetsAttemptAfterFailure),
             ("respawn load clips do not include death preroll", RespawnLoadClipsDoNotIncludeDeathPreroll),
+            ("late checkpoint respawn transition counts as success", LateCheckpointRespawnTransitionCountsAsSuccess),
+            ("respawn attempt with another death is discarded", RespawnAttemptWithAnotherDeathIsDiscarded),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
@@ -247,6 +249,61 @@ public static class SelfTests
 
         var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
         Assert(success.StartOutputDurationMs == 3_000, "respawn load success should start exactly at load_level without prerolling into death footage");
+    }
+
+    private static void LateCheckpointRespawnTransitionCountsAsSuccess()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var death = start.AddSeconds(1);
+        var lateCheckpointRespawnLoad = start.AddMilliseconds(1_600);
+        var transition = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "death", Utc = death, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = lateCheckpointRespawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn", ["source"] = "level_load_hook" } },
+            new() { EventType = "transition", Utc = transition, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 500,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var success = doc.Clips.Single(c => c.Reasons.Contains("final_successful_attempt"));
+        Assert(success.StartUtc == lateCheckpointRespawnLoad && success.EndUtc == transition, "late checkpoint respawn should keep respawn load -> transition");
+        Assert(success.StartUtc > death, "success clip must start after the death event");
+    }
+
+    private static void RespawnAttemptWithAnotherDeathIsDiscarded()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var firstRespawnLoad = start.AddSeconds(1);
+        var secondRespawnLoad = start.AddSeconds(2);
+        var transition = start.AddSeconds(3);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = firstRespawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn", ["source"] = "level_load_hook" } },
+            new() { EventType = "death", Utc = start.AddMilliseconds(1_500), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = secondRespawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn", ["source"] = "level_load_hook" } },
+            new() { EventType = "transition", Utc = transition, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 500,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        Assert(!doc.Clips.Any(c => c.StartUtc == firstRespawnLoad && c.EndUtc == transition), "failed respawn attempt must not be kept through the later transition");
+        Assert(HasClipCovering(doc, secondRespawnLoad, transition), "later death-free respawn attempt should be kept");
     }
 
     private static void StandaloneRoomEntryLoadGetsDelay()
