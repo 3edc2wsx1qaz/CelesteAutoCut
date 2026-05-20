@@ -145,6 +145,7 @@ helper 工作目录：
 - 不符合上述模式的事件不会生成片段，诊断会写入 `clip_intervals.json` 的 `warnings`，不会刷 Celeste 控制台；
 - 事件时间上首尾相连且属于同一地图的候选区间会合并成一个 `merged_linear_interval`，不会删除 1ms 这类过短候选；这样既保留转场时间，又避免 ffmpeg 生成只有音频没有视频帧的超短 segment；
 - 如果最后一个保留片段的 `post-roll` 超出 OBS 实际录制文件尾，生成区间时会夹到录制文件末尾；只有事件本身已经超出录制文件时才继续标记为 `source_file_mapping_gap`。
+- 子进程资源释放：模组关闭时会终止 helper 进程树，等待 stdout/stderr 输出管道泵结束后再释放 `Process`；helper 调用 ffmpeg 时也会在等待退出后释放进程对象。
 - 如果 `room_enter -> load_level` 没有和后续成功区间时间连续合并，会在 `load_level` 后应用一次 `PostRollMs` delay，原因标记为 `room_entry_load_delay`，避免进房片段刚加载完就硬切；
 - 折返抑制已取消：`A -> B -> A -> B`、支路返回、同名房间再进入都按同一套线性事件规则处理。
 

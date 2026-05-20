@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Celeste.Mod;
 using Monocle;
@@ -15,6 +16,8 @@ internal sealed class ObsAutoAssemblerLauncher {
     private readonly ReplayController replayController;
     private readonly object gate = new();
     private Process? process;
+    private Task? stdoutPumpTask;
+    private Task? stderrPumpTask;
     private Task? startTask;
     private int launchAttemptId;
     private bool stopping;
@@ -36,10 +39,16 @@ internal sealed class ObsAutoAssemblerLauncher {
 
     public void Stop() {
         Process? processToStop;
+        Task? stdoutPumpToStop;
+        Task? stderrPumpToStop;
         lock (gate) {
             launchAttemptId++;
             processToStop = process;
+            stdoutPumpToStop = stdoutPumpTask;
+            stderrPumpToStop = stderrPumpTask;
             process = null;
+            stdoutPumpTask = null;
+            stderrPumpTask = null;
             stopping = processToStop is not null;
         }
 
@@ -51,6 +60,7 @@ internal sealed class ObsAutoAssemblerLauncher {
         } catch (Exception e) {
             Log($"Failed to stop OBS auto-assembler helper: {e.Message}", LogLevel.Warn);
         } finally {
+            WaitForPumpTasks(stdoutPumpToStop, stderrPumpToStop, 2000);
             processToStop?.Dispose();
         }
     }
@@ -113,11 +123,19 @@ internal sealed class ObsAutoAssemblerLauncher {
                 }
 
                 process = startedProcess;
+                stdoutPumpTask = null;
+                stderrPumpTask = null;
                 stopping = false;
             }
 
-            _ = PumpOutputAsync(startedProcess.StandardOutput, stdoutPath);
-            _ = PumpOutputAsync(startedProcess.StandardError, stderrPath);
+            Task stdoutPump = PumpOutputAsync(startedProcess.StandardOutput, stdoutPath);
+            Task stderrPump = PumpOutputAsync(startedProcess.StandardError, stderrPath);
+            lock (gate) {
+                if (ReferenceEquals(process, startedProcess)) {
+                    stdoutPumpTask = stdoutPump;
+                    stderrPumpTask = stderrPump;
+                }
+            }
         } catch (Exception e) {
             Log($"Failed to start OBS auto-assembler helper: {e}", LogLevel.Error);
         } finally {
@@ -132,6 +150,8 @@ internal sealed class ObsAutoAssemblerLauncher {
     private void OnProcessExited(Process exitedProcess) {
         int? exitCode = null;
         bool expectedExit = false;
+        Task? stdoutPumpToWait = null;
+        Task? stderrPumpToWait = null;
         try {
             exitCode = exitedProcess.ExitCode;
         } catch {
@@ -142,28 +162,79 @@ internal sealed class ObsAutoAssemblerLauncher {
             expectedExit = stopping;
             if (ReferenceEquals(process, exitedProcess)) {
                 process = null;
+                stdoutPumpToWait = stdoutPumpTask;
+                stderrPumpToWait = stderrPumpTask;
+                stdoutPumpTask = null;
+                stderrPumpTask = null;
             }
             stopping = false;
         }
 
-        if (expectedExit || exitCode == 0) {
-            exitedProcess.Dispose();
+        if (expectedExit) {
             return;
         }
 
-        Log($"OBS auto-assembler helper exited with code {exitCode?.ToString() ?? "unknown"}.", LogLevel.Warn);
-        exitedProcess.Dispose();
+        if (exitCode != 0) {
+            Log($"OBS auto-assembler helper exited with code {exitCode?.ToString() ?? "unknown"}.", LogLevel.Warn);
+        }
+
+        _ = DisposeAfterPumpsAsync(exitedProcess, stdoutPumpToWait, stderrPumpToWait);
     }
 
     private static async Task PumpOutputAsync(StreamReader reader, string path) {
-        await using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-        await using var writer = new StreamWriter(stream) { AutoFlush = true };
-        while (!reader.EndOfStream) {
-            string? line = await reader.ReadLineAsync();
-            if (line == null) {
-                break;
+        try {
+            await using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            await using var writer = new StreamWriter(stream) { AutoFlush = true };
+            while (!reader.EndOfStream) {
+                string? line = await reader.ReadLineAsync();
+                if (line == null) {
+                    break;
+                }
+                await writer.WriteLineAsync(line);
             }
-            await writer.WriteLineAsync(line);
+        } catch (ObjectDisposedException) {
+            // The helper process can be killed during shutdown while the stream is still draining.
+        } catch (InvalidOperationException) {
+            // StandardOutput/StandardError may already be closed by Process disposal.
+        } catch (IOException) {
+            // Pipe closed during normal process termination.
+        }
+    }
+
+    private static async Task DisposeAfterPumpsAsync(Process process, Task? stdoutPumpTask, Task? stderrPumpTask) {
+        try {
+            await WaitForPumpTasksAsync(stdoutPumpTask, stderrPumpTask).ConfigureAwait(false);
+        } finally {
+            process.Dispose();
+        }
+    }
+
+    private static async Task WaitForPumpTasksAsync(params Task?[] tasks) {
+        Task[] activeTasks = tasks.Where(task => task is not null).Cast<Task>().ToArray();
+        if (activeTasks.Length == 0) {
+            return;
+        }
+
+        try {
+            await Task.WhenAll(activeTasks).ConfigureAwait(false);
+        } catch {
+            // PumpOutputAsync already treats stream-closure races as normal shutdown.
+        }
+    }
+
+    private static void WaitForPumpTasks(Task? stdoutPumpTask, Task? stderrPumpTask, int timeoutMs) {
+        Task[] activeTasks = new[] { stdoutPumpTask, stderrPumpTask }
+            .Where(task => task is not null)
+            .Cast<Task>()
+            .ToArray();
+        if (activeTasks.Length == 0) {
+            return;
+        }
+
+        try {
+            Task.WaitAll(activeTasks, timeoutMs);
+        } catch {
+            // PumpOutputAsync already treats stream-closure races as normal shutdown.
         }
     }
 

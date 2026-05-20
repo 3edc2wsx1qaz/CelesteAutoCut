@@ -218,7 +218,7 @@ public sealed class AssemblyPlanner
 
     private static void RunFfmpeg(string ffmpegPath, string arguments, string workingDirectory)
     {
-        var process = Process.Start(new ProcessStartInfo
+        using var process = Process.Start(new ProcessStartInfo
         {
             FileName = ffmpegPath,
             Arguments = arguments,
