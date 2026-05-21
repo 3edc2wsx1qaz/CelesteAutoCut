@@ -195,6 +195,8 @@ D:\Steam\steamapps\common\Celeste\Mods
 
 中只有一个活动的 `CelesteAutoCut*.zip`。删除旧的 `CelesteAutoCut-*.zip` 副本，避免 Everest 加载旧包。
 
+内置 OBS helper 会释放到 `<Celeste>/CelesteAutoCutTools/ObsClipPanel/`。helper 的版本标记包含内嵌 payload 的 SHA-256 指纹；只要 DLL 里的 helper payload 变化，下一次游戏启动会自动重新释放并覆盖旧 helper，避免旧 `ObsClipPanel.exe` 继续使用过期的 room event 读取逻辑。
+
 ### 3. 控制台出现大量失败尝试日志
 
 当前版本已移除 `Discarded failed checkpoint attempt` 这类正常失败尝试日志；旧的成功通关逐帧输入记录功能也已删除。房间事件重置、helper 正常退出等非错误路径不再向控制台输出常规日志。

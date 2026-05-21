@@ -2,6 +2,7 @@
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security.Cryptography;
 using Celeste.Mod;
 
 namespace Celeste.Mod.CelesteAutoCut;
@@ -93,7 +94,12 @@ internal static class BundledObsHelper {
 
     private static string GetPayloadVersion() {
         AssemblyName assemblyName = typeof(BundledObsHelper).Assembly.GetName();
-        return assemblyName.Version?.ToString() ?? "0.0.0.0";
+        using Stream payloadStream = typeof(BundledObsHelper).Assembly.GetManifestResourceStream(PayloadResourceName)
+            ?? throw new FileNotFoundException($"Embedded OBS helper payload not found: {PayloadResourceName}");
+        using var sha256 = SHA256.Create();
+        string assemblyVersion = assemblyName.Version?.ToString() ?? "0.0.0.0";
+        string payloadHash = Convert.ToHexString(sha256.ComputeHash(payloadStream));
+        return $"{assemblyVersion}:{payloadHash}";
     }
 
     private static void EnsureDirectoryDeleted(string path) {
