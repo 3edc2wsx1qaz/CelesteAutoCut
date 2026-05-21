@@ -41,11 +41,23 @@ public sealed class IntervalGenerator
             var timedCandidate = candidate;
             var usesDynamicRoomEntryEnd = false;
             var usesDynamicLoadLevelStart = false;
-            if (IsStandaloneRoomEntryLoad(candidate) &&
-                TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var dynamicEnd))
+            if (IsStandaloneRoomEntryLoad(candidate))
             {
-                timedCandidate = candidate with { End = dynamicEnd };
-                usesDynamicRoomEntryEnd = true;
+                var hasSample = TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var dynamicEnd, out var dynamicEndIsStationary);
+                if (hasSample && dynamicEndIsStationary)
+                {
+                    timedCandidate = candidate with { End = dynamicEnd };
+                    usesDynamicRoomEntryEnd = true;
+                }
+                else if (TryFindRoomEntryDeathReloadEnd(sortedEvents, candidate.End, out var reloadEnd))
+                {
+                    timedCandidate = candidate with { End = reloadEnd, BaseValidReason = "room_entry_load_death_reload" };
+                }
+                else if (hasSample)
+                {
+                    timedCandidate = candidate with { End = dynamicEnd };
+                    usesDynamicRoomEntryEnd = true;
+                }
             }
 
             if (!candidate.IsCheckpointIntro &&
@@ -536,11 +548,7 @@ public sealed class IntervalGenerator
                 if (SameMapAndRoom(roomEnter, current))
                 {
                     firstLoad = current;
-                    var candidateEnd = TryFindRoomEntryDeathReloadEnd(events, i + 1, firstLoad, out var reloadLoad)
-                        ? reloadLoad
-                        : firstLoad;
-                    var reason = ReferenceEquals(candidateEnd, firstLoad) ? "room_entry_load" : "room_entry_load_death_reload";
-                    AddCandidate(result, ref index, roomEnter, candidateEnd, roomEnter.Room ?? firstLoad.Room ?? "room", roomEnter.MapSid ?? firstLoad.MapSid, reason, true);
+                    AddCandidate(result, ref index, roomEnter, firstLoad, roomEnter.Room ?? firstLoad.Room ?? "room", roomEnter.MapSid ?? firstLoad.MapSid, "room_entry_load", true);
                     i++;
                     return true;
                 }
@@ -574,11 +582,25 @@ public sealed class IntervalGenerator
 
     private static bool TryFindRoomEntryDeathReloadEnd(
         IReadOnlyList<RoomEvent> events,
-        int searchStart,
         RoomEvent firstLoad,
         out RoomEvent reloadLoad)
     {
         reloadLoad = firstLoad;
+        var searchStart = -1;
+        for (var i = 0; i < events.Count; i++)
+        {
+            if (ReferenceEquals(events[i], firstLoad))
+            {
+                searchStart = i + 1;
+                break;
+            }
+        }
+
+        if (searchStart < 0)
+        {
+            return false;
+        }
+
         RoomEvent? death = null;
         var windowEnd = firstLoad.Utc + RoomEntryDeathReloadWindow;
         for (var i = searchStart; i < events.Count; i++)
@@ -1127,9 +1149,14 @@ public sealed class IntervalGenerator
         return true;
     }
 
-    private static bool TryFindRoomEntryLoadPlayerPositionEnd(ClipCandidate candidate, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicEnd)
+    private static bool TryFindRoomEntryLoadPlayerPositionEnd(
+        ClipCandidate candidate,
+        IReadOnlyList<RoomEvent> events,
+        out RoomEvent dynamicEnd,
+        out bool dynamicEndIsStationary)
     {
         dynamicEnd = candidate.End;
+        dynamicEndIsStationary = false;
         if (!TryGetSpawnPoint(candidate.End, out var spawnPoint))
         {
             return false;
@@ -1150,7 +1177,9 @@ public sealed class IntervalGenerator
             return false;
         }
 
-        RoomEvent? best = null;
+        RoomEvent? bestStationary = null;
+        var bestStationaryDistanceSquared = double.MaxValue;
+        RoomEvent? bestByDistance = null;
         var bestDistanceSquared = double.MaxValue;
         for (var i = loadIndex + 1; i < events.Count; i++)
         {
@@ -1165,9 +1194,15 @@ public sealed class IntervalGenerator
                 }
 
                 var distanceSquared = DistanceSquared(spawnPoint, position);
+                if (IsStationaryPlayerPositionSample(current) && distanceSquared < bestStationaryDistanceSquared)
+                {
+                    bestStationary = current;
+                    bestStationaryDistanceSquared = distanceSquared;
+                }
+
                 if (distanceSquared < bestDistanceSquared)
                 {
-                    best = current;
+                    bestByDistance = current;
                     bestDistanceSquared = distanceSquared;
                 }
 
@@ -1180,14 +1215,24 @@ public sealed class IntervalGenerator
             }
         }
 
-        if (best is null)
+        if (bestStationary is not null)
+        {
+            dynamicEnd = bestStationary;
+            dynamicEndIsStationary = true;
+            return true;
+        }
+
+        if (bestByDistance is null)
         {
             return false;
         }
 
-        dynamicEnd = best;
+        dynamicEnd = bestByDistance;
         return true;
     }
+
+    private static bool IsStationaryPlayerPositionSample(RoomEvent sample)
+        => bool.TryParse(GetNoteString(sample, "stationary"), out var stationary) && stationary;
 
     private static bool SampleBelongsToLoad(RoomEvent sample, RoomEvent loadLevel)
     {

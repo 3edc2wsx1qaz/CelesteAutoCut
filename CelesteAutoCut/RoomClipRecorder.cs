@@ -48,6 +48,7 @@ internal sealed class RoomClipRecorder {
     private long playerPositionSampleUntilFrame = long.MinValue;
     private long lastPlayerPositionSampleFrame = long.MinValue;
     private PlayerPositionSampleMode playerPositionSampleMode;
+    private PendingPlayerPositionSample? pendingPlayerPositionSample;
     private RoomClipEvent? bestPlayerPositionSampleEvent;
     private bool bestPlayerPositionSampleIsStationary;
     private double bestPlayerPositionSampleDistanceSquared = double.MaxValue;
@@ -332,12 +333,6 @@ internal sealed class RoomClipRecorder {
             return;
         }
 
-        if (playerPositionSampleMode == PlayerPositionSampleMode.RoomEntryBestWithinWindow &&
-            lastPlayerPositionSampleFrame != long.MinValue &&
-            (gameFrame - lastPlayerPositionSampleFrame) < PlayerPositionSampleIntervalFrames) {
-            return;
-        }
-
         var session = level.Session;
         var room = session.Level ?? string.Empty;
         if (!string.Equals(room, playerPositionSampleRoom ?? string.Empty, StringComparison.Ordinal)) {
@@ -354,33 +349,59 @@ internal sealed class RoomClipRecorder {
             return;
         }
 
+        bool isStationary = player.Speed.LengthSquared() <= 0.0001f;
+        ResolvePendingPlayerPositionSample(isStationary);
         var spawnPoint = playerPositionSampleSpawnPoint.Value;
-        lastPlayerPositionSampleFrame = gameFrame;
         if (playerPositionSampleMode == PlayerPositionSampleMode.FixedFrameAfterLoad) {
-            bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, player.Position, spawnPoint);
+            bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, player.Position, spawnPoint, isStationary: null);
             FlushPlayerPositionSample();
             ClearPlayerPositionSampling();
             return;
         }
 
+        if (lastPlayerPositionSampleFrame != long.MinValue &&
+            (gameFrame - lastPlayerPositionSampleFrame) < PlayerPositionSampleIntervalFrames) {
+            return;
+        }
+
+        lastPlayerPositionSampleFrame = gameFrame;
         var distanceSquared = DistanceSquared(player.Position, spawnPoint);
-        bool isStationary = player.Speed.LengthSquared() <= 0.0001f;
+        if (isStationary) {
+            pendingPlayerPositionSample = new PendingPlayerPositionSample(room, player.Position, spawnPoint, distanceSquared, gameFrame);
+            return;
+        }
+
+        RecordPlayerPositionSample(room, player.Position, spawnPoint, isStationary: false, distanceSquared);
+    }
+
+    private void ResolvePendingPlayerPositionSample(bool nextFrameIsStationary) {
+        if (!pendingPlayerPositionSample.HasValue || gameFrame <= pendingPlayerPositionSample.Value.GameFrame) {
+            return;
+        }
+
+        var pending = pendingPlayerPositionSample.Value;
+        pendingPlayerPositionSample = null;
+        RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, nextFrameIsStationary, pending.DistanceSquared);
+    }
+
+    private void RecordPlayerPositionSample(string room, Vector2 playerPosition, Vector2 spawnPoint, bool isStationary, double distanceSquared) {
         if (!IsBetterPlayerPositionSample(isStationary, distanceSquared)) {
             return;
         }
 
         bestPlayerPositionSampleIsStationary = isStationary;
         bestPlayerPositionSampleDistanceSquared = distanceSquared;
-        bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, player.Position, spawnPoint);
+        bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, playerPosition, spawnPoint, isStationary);
     }
 
-    private RoomClipEvent CreatePlayerPositionSampleEvent(string room, Vector2 playerPosition, Vector2 spawnPoint) {
+    private RoomClipEvent CreatePlayerPositionSampleEvent(string room, Vector2 playerPosition, Vector2 spawnPoint, bool? isStationary) {
         return CreateEvent(RoomClipEventTypes.PlayerPositionSample, room, notes: new Dictionary<string, string?> {
             ["loadEventId"] = playerPositionSampleLoadEventId,
             ["x"] = playerPosition.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["y"] = playerPosition.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["spawnPointX"] = spawnPoint.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["spawnPointY"] = spawnPoint.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ["spawnPointY"] = spawnPoint.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["stationary"] = isStationary?.ToString()
         });
     }
 
@@ -391,6 +412,7 @@ internal sealed class RoomClipRecorder {
         playerPositionSampleUntilFrame = long.MinValue;
         lastPlayerPositionSampleFrame = long.MinValue;
         playerPositionSampleMode = PlayerPositionSampleMode.None;
+        pendingPlayerPositionSample = null;
         bestPlayerPositionSampleEvent = null;
         bestPlayerPositionSampleIsStationary = false;
         bestPlayerPositionSampleDistanceSquared = double.MaxValue;
@@ -540,6 +562,10 @@ internal sealed class RoomClipRecorder {
     }
 
     private void FlushPlayerPositionSample() {
+        if (pendingPlayerPositionSample.HasValue) {
+            ResolvePendingPlayerPositionSample(nextFrameIsStationary: false);
+        }
+
         if (bestPlayerPositionSampleEvent is null) {
             return;
         }
@@ -575,5 +601,12 @@ internal sealed class RoomClipRecorder {
         RoomEntryBestWithinWindow,
         FixedFrameAfterLoad
     }
+
+    private readonly record struct PendingPlayerPositionSample(
+        string Room,
+        Vector2 PlayerPosition,
+        Vector2 SpawnPoint,
+        double DistanceSquared,
+        long GameFrame);
 
 }

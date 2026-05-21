@@ -23,6 +23,7 @@ public static class SelfTests
             ("same respawn point does not keep death route", SameRespawnPointDoesNotKeepDeathRoute),
             ("respawn attempt with another death is discarded", RespawnAttemptWithAnotherDeathIsDiscarded),
             ("room entry load ends at closest spawn sample", RoomEntryLoadEndsAtClosestSpawnSample),
+            ("room entry stationary sample beats death reload", RoomEntryStationarySampleBeatsDeathReload),
             ("room entry death reload beats spawn sample", RoomEntryDeathReloadBeatsSpawnSample),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
@@ -450,6 +451,36 @@ public static class SelfTests
         Assert(entryLoad.EndUtc == respawnLoad, "room entry death-reload segment should end at the reload, not the spawn sample");
         Assert(entryLoad.EndOutputDurationMs == 3_000, "room entry death-reload segment must not add postroll or dynamic sample end");
         Assert(doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == start.AddSeconds(2)), "successful attempt should remain separate after the reload");
+    }
+
+    private static void RoomEntryStationarySampleBeatsDeathReload()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var movingClosestSample = start.AddMilliseconds(420);
+        var stationarySample = start.AddMilliseconds(520);
+        var respawnLoad = start.AddSeconds(1);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = movingClosestSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 101, 100, stationary: false) },
+            new() { EventType = "player_position_sample", Utc = stationarySample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 130, 100, stationary: true) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 500,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_player_position_end"));
+        Assert(entryLoad.EndUtc == stationarySample, "stationary room-entry sample should beat death-reload and closer moving samples");
+        Assert(!entryLoad.Reasons.Contains("room_entry_load_death_reload"), "stationary sample should keep the normal sample-end reason");
     }
 
     private static void StandaloneRoomEntryLoadGetsDelay()
@@ -1123,12 +1154,21 @@ public static class SelfTests
         ["spawnPointY"] = y.ToString(System.Globalization.CultureInfo.InvariantCulture)
     };
 
-    private static Dictionary<string, object?> PlayerSampleNotes(string loadEventId, double x, double y) => new()
+    private static Dictionary<string, object?> PlayerSampleNotes(string loadEventId, double x, double y, bool? stationary = null)
     {
-        ["loadEventId"] = loadEventId,
-        ["x"] = x.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        ["y"] = y.ToString(System.Globalization.CultureInfo.InvariantCulture)
-    };
+        var notes = new Dictionary<string, object?>
+        {
+            ["loadEventId"] = loadEventId,
+            ["x"] = x.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["y"] = y.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        };
+        if (stationary.HasValue)
+        {
+            notes["stationary"] = stationary.Value.ToString();
+        }
+
+        return notes;
+    }
 
     private static RecordingManifest Recording(string id, DateTimeOffset startUtc, string path, long startMs, long endMs) =>
         Recording(id, startUtc, [new RecordingFileManifest { Path = path, StartDurationMs = startMs, EndDurationMs = endMs }]);
