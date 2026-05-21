@@ -5,8 +5,6 @@ namespace ObsClipSidecar;
 
 public sealed class IntervalGenerator
 {
-    private const double SpawnPositionToleranceSquared = 0.25d;
-
     public ClipIntervalsDocument Generate(IReadOnlyList<RoomEvent> roomEvents, SessionManifest manifest, IntervalGenerationOptions? options = null)
     {
         options ??= new IntervalGenerationOptions();
@@ -50,7 +48,6 @@ public sealed class IntervalGenerator
 
             if (!candidate.IsCheckpointIntro &&
                 IsLoadLevelStart(timedCandidate) &&
-                !IsRoomEntryLoadLevel(timedCandidate.Start, sortedEvents) &&
                 TryFindLoadLevelPlayerPositionStart(timedCandidate.Start, sortedEvents, out var dynamicStart))
             {
                 timedCandidate = timedCandidate with { Start = dynamicStart };
@@ -1009,42 +1006,6 @@ public sealed class IntervalGenerator
     private static bool IsStandaloneRoomEntryLoad(ClipCandidate candidate)
         => string.Equals(candidate.BaseValidReason, "room_entry_load", StringComparison.Ordinal);
 
-    private static bool IsRoomEntryLoadLevel(RoomEvent loadLevel, IReadOnlyList<RoomEvent> events)
-    {
-        if (IsRespawnLoadLevel(loadLevel))
-        {
-            return false;
-        }
-
-        var loadIndex = -1;
-        for (var i = 0; i < events.Count; i++)
-        {
-            if (ReferenceEquals(events[i], loadLevel))
-            {
-                loadIndex = i;
-                break;
-            }
-        }
-
-        if (loadIndex <= 0)
-        {
-            return false;
-        }
-
-        for (var i = loadIndex - 1; i >= 0; i--)
-        {
-            var current = events[i];
-            if (IsPlayerPositionSample(current))
-            {
-                continue;
-            }
-
-            return IsRoomEntry(current) && SameMapAndRoom(current, loadLevel);
-        }
-
-        return false;
-    }
-
     private static bool TryFindLoadLevelPlayerPositionStart(RoomEvent loadLevel, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicStart)
     {
         dynamicStart = loadLevel;
@@ -1063,11 +1024,9 @@ public sealed class IntervalGenerator
             return false;
         }
 
-        if (!TryGetSpawnPoint(loadLevel, out var spawnPoint))
-        {
-            return false;
-        }
-
+        TryGetSpawnPoint(loadLevel, out var spawnPoint);
+        RoomEvent? best = null;
+        var bestDistanceSquared = double.MaxValue;
         for (var i = loadIndex + 1; i < events.Count; i++)
         {
             var current = events[i];
@@ -1080,11 +1039,17 @@ public sealed class IntervalGenerator
                     continue;
                 }
 
-                var distanceSquared = DistanceSquared(spawnPoint, position);
-                if (distanceSquared <= SpawnPositionToleranceSquared)
+                if (!TryGetSpawnPoint(loadLevel, out spawnPoint))
                 {
                     dynamicStart = current;
                     return true;
+                }
+
+                var distanceSquared = DistanceSquared(spawnPoint, position);
+                if (distanceSquared < bestDistanceSquared)
+                {
+                    best = current;
+                    bestDistanceSquared = distanceSquared;
                 }
 
                 continue;
@@ -1096,7 +1061,13 @@ public sealed class IntervalGenerator
             }
         }
 
-        return false;
+        if (best is null)
+        {
+            return false;
+        }
+
+        dynamicStart = best;
+        return true;
     }
 
     private static bool TryFindRoomEntryLoadPlayerPositionEnd(ClipCandidate candidate, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicEnd)
