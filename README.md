@@ -117,7 +117,7 @@ helper 工作目录：
 
 - 房间事件记录和内置 OBS helper 作为自动剪辑核心路径始终启用。
 - 旧的输入录制/回放、`F5/F6/F7` 热键、成功通关逐帧输入导出已经移除，不再占用 CPU/内存，也不会出现在 Mod Options。
-- OBS helper 默认轮询间隔为 `1000ms`；房间状态文件最多约每秒刷新一次；`room_enter -> load_level` 的进房 load 后人物坐标观察为每 20 帧一次、最多约 8 秒，并只把一个最佳 `player_position_sample` 写入当前 `room_event_<timestamp>.jsonl`；非进房 `load_level` 只在 load 后固定第 100 帧写入一次人物坐标样本。事件 jsonl 只保留剪辑判断需要的字段，删除冗余来源/原因/草莓属性/采样元信息，降低单行长度和磁盘写入量。
+- OBS helper 默认轮询间隔为 `1000ms`；房间状态文件最多约每秒刷新一次；`room_enter -> load_level` 的进房 load 后人物坐标观察为每 20 帧一次、最多约 8 秒，并只把一个最佳 `player_position_sample` 写入当前 `room_event_<timestamp>.jsonl`；非进房 `load_level` 只在 load 后固定第 60 帧写入一次人物坐标样本。事件 jsonl 只保留剪辑判断需要的字段，删除冗余来源/原因/草莓属性/采样元信息，降低单行长度和磁盘写入量。
 - 正常运行的 Info 级日志不再刷 Celeste 控制台；只保留警告、错误和手动命令输出。
 
 ---
@@ -141,11 +141,11 @@ helper 工作目录：
   - `load_level -> level_complete`：保留为 `final_successful_attempt`，然后继续保留后续 `level_complete -> exit`；
   - `load_level -> exit`：不保留成功片段，直接跳到后续 session；
 - 普通情况下，`death` / `load_end` 会使当前 `load_level` 失效；只有后续同一 `MapSid + Room` 的新 `load_level` 才能重新成为成功片段起点；
-- 终点前 checkpoint 特例：同一房间内 `load_level(A) -> death -> load_level(B) -> transition` 也可算合法成功段，但成功段从 B 加载后固定第 100 帧的 `player_position_sample` 开始，避免保留死亡转场动画；A 与 B 的 `respawnPointX/Y` 必须存在且坐标不同，B->transition 中不能再出现额外 `death` / `load_end`；这个区间原因标记为 `checkpoint_death_successful_attempt`；
+- 终点前 checkpoint 特例：同一房间内 `load_level(A) -> death -> load_level(B) -> transition` 也可算合法成功段，但成功段从 B 加载后固定第 60 帧的 `player_position_sample` 开始，避免保留死亡转场动画；A 与 B 的 `respawnPointX/Y` 必须存在且坐标不同，B->transition 中不能再出现额外 `death` / `load_end`；这个区间原因标记为 `checkpoint_death_successful_attempt`；
 - Respawn 的 `load_level` 不再由死亡后一帧的 `Level.Update` 猜测写入，而是在 Celeste 实际执行 `Level.LoadLevel(playerIntro=Respawn)` 并加载完玩家后写入；因此成功片段从 Respawn checkpoint 的实际加载完成点开始，不会把死亡动画当作片段开头；
 - Celeste 死亡后会按 `Session.RespawnPoint` / 当前房间 spawn 点重新 `LoadLevel(Respawn)`：如果该 checkpoint 位于房间末尾，随后无死亡进入下一个房间，则 `Respawn load_level -> transition` 算成功片段；如果回到房间开头或中途 checkpoint，也同样从该 Respawn load 开始，只有后续再次 `death` 才会丢弃这次尝试；
 - 每个带复活点的 `load_level` 事件都会在当前 `room_event_<timestamp>.jsonl` 的 `notes` 中记录当时的 `Session.RespawnPoint`：`respawnPointX`、`respawnPointY`，用于确认这次加载对应房间开头、中途还是末尾复活点；不再写入 `hasRespawnPoint` 这类可由坐标是否存在推导的冗余字段；
-- 模组会按 load 类型写入 `player_position_sample`：进房 `room_enter -> load_level` 使用约 8 秒窗口、每 20 帧一次，并只落盘当前 load 的最佳样本，优先选择人物当前帧和下一帧速度都为 0 的帧，其次选择位置最接近 spawn point 的帧；非进房 `load_level` 不跑 8 秒窗口，而是在 load 后固定第 100 帧写入一次人物坐标。采样会带上 `loadEventId`、人物坐标、对应 spawn point，以及进房采样是否连续两帧静止的 `stationary`；单条采样不再写入 `source`、采样间隔、采样窗口等可由版本行为确定的冗余字段；这些采样只用于 helper 计算进房片段结束点或 Respawn/checkpoint 成功段起点，不会触发状态文件频繁刷新；
+- 模组会按 load 类型写入 `player_position_sample`：进房 `room_enter -> load_level` 使用约 8 秒窗口、每 20 帧一次，并只落盘当前 load 的最佳样本，优先选择人物当前帧和下一帧速度都为 0 的帧，其次选择位置最接近 spawn point 的帧；非进房 `load_level` 不跑 8 秒窗口，而是在 load 后固定第 60 帧写入一次人物坐标。采样会带上 `loadEventId`、人物坐标、对应 spawn point，以及进房采样是否连续两帧静止的 `stationary`；单条采样不再写入 `source`、采样间隔、采样窗口等可由版本行为确定的冗余字段；这些采样只用于 helper 计算进房片段结束点或 Respawn/checkpoint 成功段起点，不会触发状态文件频繁刷新；
 - 若成功片段从 `load_level(playerIntro=Respawn)` 开始，该片段起点不会应用 pre-roll，会直接从人物加载完毕的时间点开始，避免死亡前画面残留；
 - 不符合上述模式的事件不会生成片段，诊断会写入 `clip_intervals.json` 的 `warnings`，不会刷 Celeste 控制台；
 - 事件时间上首尾相连且属于同一地图的候选区间会合并成一个 `merged_linear_interval`，不会删除 1ms 这类过短候选；这样既保留转场时间，又避免 ffmpeg 生成只有音频没有视频帧的超短 segment；
