@@ -23,6 +23,7 @@ public static class SelfTests
             ("same respawn point does not keep death route", SameRespawnPointDoesNotKeepDeathRoute),
             ("respawn attempt with another death is discarded", RespawnAttemptWithAnotherDeathIsDiscarded),
             ("room entry load ends at closest spawn sample", RoomEntryLoadEndsAtClosestSpawnSample),
+            ("room entry death reload beats spawn sample", RoomEntryDeathReloadBeatsSpawnSample),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
@@ -400,17 +401,13 @@ public static class SelfTests
         var start = BaseUtc.AddSeconds(2);
         var load = start.AddMilliseconds(200);
         var closestSample = start.AddMilliseconds(420);
-        var respawnLoad = start.AddSeconds(1);
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
             new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
             new() { EventType = "player_position_sample", Utc = start.AddMilliseconds(300), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 130, 100) },
             new() { EventType = "player_position_sample", Utc = closestSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 101, 100) },
-            new() { EventType = "player_position_sample", Utc = start.AddMilliseconds(540), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 150, 100) },
-            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
-            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
-            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
+            new() { EventType = "player_position_sample", Utc = start.AddMilliseconds(540), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 150, 100) }
         };
 
         var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
@@ -426,6 +423,35 @@ public static class SelfTests
         Assert(!doc.Warnings.Any(w => w.Contains("player_position_sample", StringComparison.Ordinal)), "player position samples should not create discard warnings");
     }
 
+    private static void RoomEntryDeathReloadBeatsSpawnSample()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var closestSample = start.AddMilliseconds(420);
+        var respawnLoad = start.AddSeconds(1);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = closestSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 101, 100) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 500,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_death_reload"));
+        Assert(entryLoad.EndUtc == respawnLoad, "room entry death-reload segment should end at the reload, not the spawn sample");
+        Assert(entryLoad.EndOutputDurationMs == 3_000, "room entry death-reload segment must not add postroll or dynamic sample end");
+        Assert(doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == start.AddSeconds(2)), "successful attempt should remain separate after the reload");
+    }
+
     private static void StandaloneRoomEntryLoadGetsDelay()
     {
         var start = BaseUtc.AddSeconds(2);
@@ -433,10 +459,7 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
-            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
-            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
-            new() { EventType = "load_level", Utc = start.AddSeconds(1), Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
-            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } }
         };
 
         var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
@@ -607,7 +630,8 @@ public static class SelfTests
         var success = doc.Clips.Single(c => c.Room == "berry" && c.Reasons.Contains("strawberry_collect_success"));
         Assert(success.StartUtc == respawnLoad && success.EndUtc == collect, "strawberry success after death should start from respawn/load_level and end at collect");
         Assert(!doc.Clips.Any(c => c.Room == "berry" && c.EndUtc == clear), "strawberry transition after collect should not create a second success clip");
-        Assert(doc.Clips.Any(c => c.Room == "berry" && c.Reasons.Contains("room_entry_load")), "death strawberry room should still keep entry-load intro");
+        Assert(doc.Clips.Any(c => c.Room == "berry" &&
+            (c.Reasons.Contains("room_entry_load") || c.Reasons.Contains("room_entry_load_death_reload"))), "death strawberry room should still keep entry-load intro");
     }
 
     private static void StrawberryBeforeDeathIsKeptAtCollectOnly()

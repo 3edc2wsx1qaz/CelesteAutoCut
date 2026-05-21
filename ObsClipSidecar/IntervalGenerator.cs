@@ -5,6 +5,8 @@ namespace ObsClipSidecar;
 
 public sealed class IntervalGenerator
 {
+    private static readonly TimeSpan RoomEntryDeathReloadWindow = TimeSpan.FromSeconds(8);
+
     public ClipIntervalsDocument Generate(IReadOnlyList<RoomEvent> roomEvents, SessionManifest manifest, IntervalGenerationOptions? options = null)
     {
         options ??= new IntervalGenerationOptions();
@@ -498,7 +500,8 @@ public sealed class IntervalGenerator
 
     private static bool CanMergeAdjacent(ClipCandidate previous, ClipCandidate current)
         => previous.End.Utc == current.Start.Utc &&
-           string.Equals(previous.MapSid ?? string.Empty, current.MapSid ?? string.Empty, StringComparison.Ordinal);
+           string.Equals(previous.MapSid ?? string.Empty, current.MapSid ?? string.Empty, StringComparison.Ordinal) &&
+           !string.Equals(previous.BaseValidReason, "room_entry_load_death_reload", StringComparison.Ordinal);
 
     private static string BuildMergedReason(string previous, string current)
     {
@@ -533,7 +536,11 @@ public sealed class IntervalGenerator
                 if (SameMapAndRoom(roomEnter, current))
                 {
                     firstLoad = current;
-                    AddCandidate(result, ref index, roomEnter, firstLoad, roomEnter.Room ?? firstLoad.Room ?? "room", roomEnter.MapSid ?? firstLoad.MapSid, "room_entry_load", true);
+                    var candidateEnd = TryFindRoomEntryDeathReloadEnd(events, i + 1, firstLoad, out var reloadLoad)
+                        ? reloadLoad
+                        : firstLoad;
+                    var reason = ReferenceEquals(candidateEnd, firstLoad) ? "room_entry_load" : "room_entry_load_death_reload";
+                    AddCandidate(result, ref index, roomEnter, candidateEnd, roomEnter.Room ?? firstLoad.Room ?? "room", roomEnter.MapSid ?? firstLoad.MapSid, reason, true);
                     i++;
                     return true;
                 }
@@ -562,6 +569,56 @@ public sealed class IntervalGenerator
 
         warnings.Add(DiscardWarning("linear_discard_missing_load_level_after_room_enter", roomEnter));
         firstLoad = roomEnter;
+        return false;
+    }
+
+    private static bool TryFindRoomEntryDeathReloadEnd(
+        IReadOnlyList<RoomEvent> events,
+        int searchStart,
+        RoomEvent firstLoad,
+        out RoomEvent reloadLoad)
+    {
+        reloadLoad = firstLoad;
+        RoomEvent? death = null;
+        var windowEnd = firstLoad.Utc + RoomEntryDeathReloadWindow;
+        for (var i = searchStart; i < events.Count; i++)
+        {
+            var current = events[i];
+            if (IsPlayerPositionSample(current))
+            {
+                continue;
+            }
+
+            if (death is null)
+            {
+                if (current.EventType is "death" &&
+                    current.Utc <= windowEnd &&
+                    SameMapAndRoom(firstLoad, current))
+                {
+                    death = current;
+                    continue;
+                }
+
+                if (IsPostLoadSemanticBoundary(current))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (current.EventType is "load_level" && SameMapAndRoom(firstLoad, current))
+            {
+                reloadLoad = current;
+                return true;
+            }
+
+            if (IsPostLoadSemanticBoundary(current))
+            {
+                return false;
+            }
+        }
+
         return false;
     }
 
