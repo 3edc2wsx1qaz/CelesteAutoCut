@@ -260,7 +260,7 @@ public static class SelfTests
     {
         var start = BaseUtc.AddSeconds(2);
         var respawnLoad = start.AddSeconds(1);
-        var spawnSample = respawnLoad.AddMilliseconds(180);
+        var firstSpawnSample = respawnLoad.AddMilliseconds(80);
         var clear = start.AddSeconds(3);
         var events = new List<RoomEvent>
         {
@@ -268,8 +268,8 @@ public static class SelfTests
             new() { EventType = "load_level", Utc = start.AddMilliseconds(200), Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 20) },
             new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
             new() { EventType = "load_level", EventId = "respawn-load", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 200) },
-            new() { EventType = "player_position_sample", Utc = respawnLoad.AddMilliseconds(80), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("respawn-load", 130, 200) },
-            new() { EventType = "player_position_sample", Utc = spawnSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("respawn-load", 100, 200) },
+            new() { EventType = "player_position_sample", Utc = firstSpawnSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("respawn-load", 100.4, 200) },
+            new() { EventType = "player_position_sample", Utc = respawnLoad.AddMilliseconds(180), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("respawn-load", 100, 200) },
             new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
         };
 
@@ -281,8 +281,8 @@ public static class SelfTests
         });
 
         var success = doc.Clips.Single(c => c.Reasons.Contains("load_level_player_position_start"));
-        Assert(success.StartUtc == spawnSample, "respawn success should start at the player sample closest to spawn");
-        Assert(success.StartOutputDurationMs == 3_180, "dynamic respawn start must not preroll into death transition footage");
+        Assert(success.StartUtc == firstSpawnSample, "respawn success should start at the first player sample that reaches spawn");
+        Assert(success.StartOutputDurationMs == 3_080, "dynamic respawn start must not preroll into death transition footage");
     }
 
     private static void LateCheckpointRespawnTransitionCountsAsSuccess()
