@@ -117,7 +117,7 @@ helper 工作目录：
 
 - 房间事件记录和内置 OBS helper 作为自动剪辑核心路径始终启用。
 - 旧的输入录制/回放、`F5/F6/F7` 热键、成功通关逐帧输入导出已经移除，不再占用 CPU/内存，也不会出现在 Mod Options。
-- OBS helper 默认轮询间隔为 `1000ms`；房间状态文件最多约每秒刷新一次；`room_enter -> load_level` 的进房 load 后人物坐标观察为每 20 帧一次、最多约 8 秒，并只把一个最佳 `player_position_sample` 写入当前 `room_event_<timestamp>.jsonl`；非进房 `load_level` 只在 load 后固定第 60 帧写入一次人物坐标样本。事件 jsonl 只保留剪辑判断需要的字段，删除冗余来源/原因/草莓属性/采样元信息，降低单行长度和磁盘写入量。
+- OBS helper 默认轮询间隔为 `1000ms`；房间状态文件最多约每秒刷新一次；`room_enter -> load_level` 的进房 load 会从 load 后第 41 帧开始观察人物坐标、持续约 4 秒、每 10 帧采一次，并只把一个最佳 `player_position_sample` 写入当前 `room_event_<timestamp>.jsonl`；非进房 `load_level` 仍只在 load 后固定第 60 帧写入一次人物坐标样本。事件 jsonl 只保留剪辑判断需要的字段，删除冗余来源/原因/草莓属性/采样元信息，降低单行长度和磁盘写入量。
 - 正常运行的 Info 级日志不再刷 Celeste 控制台；只保留警告、错误和手动命令输出。
 
 ---
@@ -145,13 +145,13 @@ helper 工作目录：
 - Respawn 的 `load_level` 不再由死亡后一帧的 `Level.Update` 猜测写入，而是在 Celeste 实际执行 `Level.LoadLevel(playerIntro=Respawn)` 并加载完玩家后写入；因此成功片段从 Respawn checkpoint 的实际加载完成点开始，不会把死亡动画当作片段开头；
 - Celeste 死亡后会按 `Session.RespawnPoint` / 当前房间 spawn 点重新 `LoadLevel(Respawn)`：如果该 checkpoint 位于房间末尾，随后无死亡进入下一个房间，则 `Respawn load_level -> transition` 算成功片段；如果回到房间开头或中途 checkpoint，也同样从该 Respawn load 开始，只有后续再次 `death` 才会丢弃这次尝试；
 - 每个带复活点的 `load_level` 事件都会在当前 `room_event_<timestamp>.jsonl` 的 `notes` 中记录当时的 `Session.RespawnPoint`：`respawnPointX`、`respawnPointY`，用于确认这次加载对应房间开头、中途还是末尾复活点；不再写入 `hasRespawnPoint` 这类可由坐标是否存在推导的冗余字段；
-- 模组会按 load 类型写入 `player_position_sample`：进房 `room_enter -> load_level` 使用约 8 秒窗口、每 20 帧一次，并只落盘当前 load 的最佳样本，优先选择人物当前帧和下一帧速度都为 0 的帧，其次选择位置最接近 spawn point 的帧；非进房 `load_level` 不跑 8 秒窗口，而是在 load 后固定第 60 帧写入一次人物坐标。采样会带上 `loadEventId`、人物坐标、对应 spawn point，以及进房采样是否连续两帧静止的 `stationary`；单条采样不再写入 `source`、采样间隔、采样窗口等可由版本行为确定的冗余字段；这些采样只用于 helper 计算进房片段结束点或 Respawn/checkpoint 成功段起点，不会触发状态文件频繁刷新；
+- 模组会按 load 类型写入 `player_position_sample`：进房 `room_enter -> load_level` 从 load 后第 41 帧开始，使用约 4 秒窗口、每 10 帧一次，并只落盘当前 load 的最佳样本，优先选择人物当前帧和下一帧速度都为 0 的帧，其次选择位置最接近 spawn point 的帧；非进房 `load_level` 不跑窗口，而是在 load 后固定第 60 帧写入一次人物坐标。采样会带上 `loadEventId`、人物坐标、对应 spawn point，以及进房采样是否连续两帧静止的 `stationary`；单条采样不再写入 `source`、采样间隔、采样窗口等可由版本行为确定的冗余字段；这些采样只用于 helper 计算单独进房片段结束点或 Respawn/checkpoint 成功段起点，不会触发状态文件频繁刷新；
 - 若成功片段从 `load_level(playerIntro=Respawn)` 开始，该片段起点不会应用 pre-roll，会直接从人物加载完毕的时间点开始，避免死亡前画面残留；
 - 不符合上述模式的事件不会生成片段，诊断会写入 `clip_intervals.json` 的 `warnings`，不会刷 Celeste 控制台；
 - 事件时间上首尾相连且属于同一地图的候选区间会合并成一个 `merged_linear_interval`，不会删除 1ms 这类过短候选；这样既保留转场时间，又避免 ffmpeg 生成只有音频没有视频帧的超短 segment；
 - 如果最后一个保留片段的 `post-roll` 超出 OBS 实际录制文件尾，生成区间时会夹到录制文件末尾；只有事件本身已经超出录制文件时才继续标记为 `source_file_mapping_gap`。
 - 子进程资源释放：模组关闭时会终止 helper 进程树，等待 stdout/stderr 输出管道泵结束后再释放 `Process`；helper 调用 ffmpeg 时也会在等待退出后释放进程对象。
-- 对单独的 `room_enter -> load_level` 进房片段，helper 的结束点优先级是：当前帧和下一帧速度都为 0 的最近 `player_position_sample` > 进房 load 后约 8 秒内同房间 `death` 且随后同房间重新 `load_level` > 距离 spawn point 最近的非静止 `player_position_sample`。death-reload 命中时会保留 `room_enter -> load_level -> death -> load_level`，原因标记为 `room_entry_load_death_reload`；sample 命中时原因标记为 `room_entry_load_player_position_end`；只有缺少 spawn point 或采样时才回退到固定 `PostRollMs` delay，原因标记为 `room_entry_load_delay`；
+- 对单独的 `room_enter -> load_level` 进房片段，helper 的结束点优先级是：当前帧和下一帧速度都为 0 的最近 `player_position_sample` > 进房 load 后约 8 秒内同房间 `death` 且随后同房间重新 `load_level` > 距离 spawn point 最近的非静止 `player_position_sample`。death-reload 命中时会保留 `room_enter -> load_level -> death -> load_level`，原因标记为 `room_entry_load_death_reload`；sample 命中时原因标记为 `room_entry_load_player_position_end`；只有缺少 spawn point 或采样时才回退到固定 `PostRollMs` delay，原因标记为 `room_entry_load_delay`。如果 `room_enter -> load_level` 后续马上由同一个 `load_level` 形成 `load_level -> transition/strawberry_collect/level_complete` 成功段，则两段按同一 load 边界直接合并，不再使用进房采样截断。
 - 折返抑制已取消：`A -> B -> A -> B`、支路返回、同名房间再进入都按同一套线性事件规则处理。
 
 最终拼接规则：
@@ -242,7 +242,7 @@ helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
 
 - 首房间初始 `Transition load_level` 不截断房间开头；
 - 死亡房间保留“进入房间 -> 初始 `load_level`”，成功片段从 `Respawn load_level` 精确开始而不是从 `death` 或死亡前 pre-roll 开始；
-- `room_enter -> load_level` 进房片段优先结束在当前帧和下一帧速度都为 0 的最近采样；若没有连续两帧静止采样且 8 秒内死亡并重新 load，则保留到重新 load；否则结束在 load 后最接近 spawn point 的人物坐标采样，缺少采样时才回退到固定 `PostRollMs` delay；
+- 单独的 `room_enter -> load_level` 进房片段优先结束在当前帧和下一帧速度都为 0 的最近采样；若没有连续两帧静止采样且 8 秒内死亡并重新 load，则保留到重新 load；否则结束在 load 后第 41 帧开始、4 秒窗口内最接近 spawn point 的人物坐标采样，缺少采样时才回退到固定 `PostRollMs` delay；如果后续成功段使用同一个 load，则直接合并为一个连续片段，不用进房采样截断；
 - 终点前 checkpoint 特例：`load -> death -> load -> transition` 只有在两次 `load_level` 的 respawnPoint 坐标不同且中间没有额外死亡时，才会从第一次 load 保留到 transition；坐标相同则仍退回普通 Respawn load 成功段；
 - 分支后再次进入同名房间时，每次访问独立生成片段；
 - 折返抑制已取消，来回折返会按普通 `room_enter/load_level/transition` 事件生成片段；

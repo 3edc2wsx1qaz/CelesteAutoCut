@@ -61,7 +61,7 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\.dotnet_home\\.nuget\\packages\\": {},
+    "C:\\Users\\18254\\.nuget\\packages\\": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
@@ -70,7 +70,7 @@
       "projectUniqueName": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\CelesteAutoCut\\CelesteAutoCut.csproj",
       "projectName": "CelesteAutoCut",
       "projectPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\CelesteAutoCut\\CelesteAutoCut.csproj",
-      "packagesPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\.dotnet_home\\.nuget\\packages\\",
+      "packagesPath": "C:\\Users\\18254\\.nuget\\packages\\",
       "outputPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\CelesteAutoCut\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [

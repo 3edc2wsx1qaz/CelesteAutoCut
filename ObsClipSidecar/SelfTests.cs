@@ -514,7 +514,8 @@ public static class SelfTests
         var events = new List<RoomEvent>
         {
             new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
-            new() { EventType = "load_level", Utc = introLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "load_level", EventId = "intro-load", Utc = introLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = introLoad.AddMilliseconds(100), Room = "a", MapSid = "map", Notes = PlayerSampleNotes("intro-load", 100, 100, stationary: true) },
             new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
         };
 
@@ -527,6 +528,7 @@ public static class SelfTests
 
         Assert(doc.Clips.Count == 1, "first room connected entry and success segments should merge into one clip");
         Assert(doc.Clips[0].Reasons.Contains("merged_linear_interval"), "first room merged clip should record merge reason");
+        Assert(!doc.Clips[0].Reasons.Contains("room_entry_load_player_position_end"), "same-load entry and success merge must ignore room-entry sample end");
         Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == clear, "initial transition load_level must not cut off first-room intro");
         Assert(doc.InvalidClips.Count == 0, "first room should not create an overlapping intro candidate");
     }

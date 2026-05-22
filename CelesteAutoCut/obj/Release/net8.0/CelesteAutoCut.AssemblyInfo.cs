@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CelesteAutoCut")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+55ded835a38329e41b496482e4169ab3510409e9")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+ba17626cea94ac7a4888a7dc641378c7a20357e3")]
 [assembly: System.Reflection.AssemblyProductAttribute("CelesteAutoCut")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CelesteAutoCut")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.1.0.0")]

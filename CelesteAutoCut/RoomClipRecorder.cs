@@ -12,8 +12,9 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 60;
-    private const long PlayerPositionSampleIntervalFrames = 20;
-    private const long PlayerPositionSampleWindowFrames = 480;
+    private const long PlayerPositionSampleStartDelayFrames = 41;
+    private const long PlayerPositionSampleIntervalFrames = 10;
+    private const long PlayerPositionSampleWindowFrames = 240;
     private const long FixedLoadPositionSampleDelayFrames = 60;
     private const string EventLogPrefix = "room_event_";
     private const string EventLogExtension = ".jsonl";
@@ -45,6 +46,7 @@ internal sealed class RoomClipRecorder {
     private string? playerPositionSampleLoadEventId;
     private string? playerPositionSampleRoom;
     private Vector2? playerPositionSampleSpawnPoint;
+    private long playerPositionSampleStartFrame = long.MinValue;
     private long playerPositionSampleUntilFrame = long.MinValue;
     private long lastPlayerPositionSampleFrame = long.MinValue;
     private PlayerPositionSampleMode playerPositionSampleMode;
@@ -307,7 +309,8 @@ internal sealed class RoomClipRecorder {
         playerPositionSampleMode = isRoomEntryLoad
             ? PlayerPositionSampleMode.RoomEntryBestWithinWindow
             : PlayerPositionSampleMode.FixedFrameAfterLoad;
-        playerPositionSampleUntilFrame = gameFrame + (isRoomEntryLoad ? PlayerPositionSampleWindowFrames : FixedLoadPositionSampleDelayFrames);
+        playerPositionSampleStartFrame = gameFrame + (isRoomEntryLoad ? PlayerPositionSampleStartDelayFrames : FixedLoadPositionSampleDelayFrames);
+        playerPositionSampleUntilFrame = playerPositionSampleStartFrame + (isRoomEntryLoad ? PlayerPositionSampleWindowFrames : 0);
         lastPlayerPositionSampleFrame = long.MinValue;
         bestPlayerPositionSampleEvent = null;
         bestPlayerPositionSampleIsStationary = false;
@@ -328,8 +331,7 @@ internal sealed class RoomClipRecorder {
             return;
         }
 
-        if (playerPositionSampleMode == PlayerPositionSampleMode.FixedFrameAfterLoad &&
-            gameFrame < playerPositionSampleUntilFrame) {
+        if (gameFrame < playerPositionSampleStartFrame) {
             return;
         }
 
@@ -409,6 +411,7 @@ internal sealed class RoomClipRecorder {
         playerPositionSampleLoadEventId = null;
         playerPositionSampleRoom = null;
         playerPositionSampleSpawnPoint = null;
+        playerPositionSampleStartFrame = long.MinValue;
         playerPositionSampleUntilFrame = long.MinValue;
         lastPlayerPositionSampleFrame = long.MinValue;
         playerPositionSampleMode = PlayerPositionSampleMode.None;

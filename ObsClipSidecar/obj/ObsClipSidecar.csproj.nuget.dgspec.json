@@ -10,7 +10,7 @@
         "projectUniqueName": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipSidecar\\ObsClipSidecar.csproj",
         "projectName": "ObsClipSidecar",
         "projectPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipSidecar\\ObsClipSidecar.csproj",
-        "packagesPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\.dotnet_home\\.nuget\\packages\\",
+        "packagesPath": "C:\\Users\\18254\\.nuget\\packages\\",
         "outputPath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipSidecar\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
@@ -47,6 +47,14 @@
       "frameworks": {
         "net8.0": {
           "targetAlias": "net8.0",
+          "dependencies": {
+            "Microsoft.NET.ILLink.Tasks": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.26, )",
+              "autoReferenced": true
+            }
+          },
           "imports": [
             "net461",
             "net462",
