@@ -12,9 +12,9 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 60;
-    private const long PlayerPositionSampleStartDelayFrames = 120;
+    private const long PlayerPositionSampleStartDelayFrames = 0;
     private const long PlayerPositionSampleIntervalFrames = 10;
-    private const long PlayerPositionSampleWindowFrames = 240;
+    private const long PlayerPositionSampleWindowFrames = 480;
     private const long FixedLoadPositionSampleDelayFrames = 60;
     private const string EventLogPrefix = "room_event_";
     private const string EventLogExtension = ".jsonl";
@@ -54,6 +54,7 @@ internal sealed class RoomClipRecorder {
     private RoomClipEvent? bestPlayerPositionSampleEvent;
     private bool bestPlayerPositionSampleIsStationary;
     private double bestPlayerPositionSampleDistanceSquared = double.MaxValue;
+    private long bestPlayerPositionSampleFrame = long.MinValue;
     private string eventLogPath = string.Empty;
 
     public RoomClipRecorder(ReplayController replayController) {
@@ -315,6 +316,7 @@ internal sealed class RoomClipRecorder {
         bestPlayerPositionSampleEvent = null;
         bestPlayerPositionSampleIsStationary = false;
         bestPlayerPositionSampleDistanceSquared = double.MaxValue;
+        bestPlayerPositionSampleFrame = long.MinValue;
     }
 
     private void ObservePlayerPositionSample(Level? level) {
@@ -373,7 +375,7 @@ internal sealed class RoomClipRecorder {
             return;
         }
 
-        RecordPlayerPositionSample(room, player.Position, spawnPoint, isStationary: false, distanceSquared);
+        RecordPlayerPositionSample(room, player.Position, spawnPoint, isStationary: false, distanceSquared, gameFrame);
     }
 
     private void ResolvePendingPlayerPositionSample(bool nextFrameIsStationary) {
@@ -383,16 +385,17 @@ internal sealed class RoomClipRecorder {
 
         var pending = pendingPlayerPositionSample.Value;
         pendingPlayerPositionSample = null;
-        RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, nextFrameIsStationary, pending.DistanceSquared);
+        RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, nextFrameIsStationary, pending.DistanceSquared, pending.GameFrame);
     }
 
-    private void RecordPlayerPositionSample(string room, Vector2 playerPosition, Vector2 spawnPoint, bool isStationary, double distanceSquared) {
-        if (!IsBetterPlayerPositionSample(isStationary, distanceSquared)) {
+    private void RecordPlayerPositionSample(string room, Vector2 playerPosition, Vector2 spawnPoint, bool isStationary, double distanceSquared, long sampleFrame) {
+        if (!IsBetterPlayerPositionSample(isStationary, distanceSquared, sampleFrame)) {
             return;
         }
 
         bestPlayerPositionSampleIsStationary = isStationary;
         bestPlayerPositionSampleDistanceSquared = distanceSquared;
+        bestPlayerPositionSampleFrame = sampleFrame;
         bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, playerPosition, spawnPoint, isStationary);
     }
 
@@ -419,6 +422,7 @@ internal sealed class RoomClipRecorder {
         bestPlayerPositionSampleEvent = null;
         bestPlayerPositionSampleIsStationary = false;
         bestPlayerPositionSampleDistanceSquared = double.MaxValue;
+        bestPlayerPositionSampleFrame = long.MinValue;
     }
 
     private RoomClipEvent WriteEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null, bool updateStatus = true) {
@@ -552,13 +556,17 @@ internal sealed class RoomClipRecorder {
         return notes.Count == 0 ? null : notes;
     }
 
-    private bool IsBetterPlayerPositionSample(bool isStationary, double distanceSquared) {
+    private bool IsBetterPlayerPositionSample(bool isStationary, double distanceSquared, long sampleFrame) {
         if (bestPlayerPositionSampleEvent is null) {
             return true;
         }
 
         if (isStationary != bestPlayerPositionSampleIsStationary) {
             return isStationary;
+        }
+
+        if (isStationary) {
+            return sampleFrame > bestPlayerPositionSampleFrame;
         }
 
         return distanceSquared < bestPlayerPositionSampleDistanceSquared;

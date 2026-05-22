@@ -1177,8 +1177,7 @@ public sealed class IntervalGenerator
             return false;
         }
 
-        RoomEvent? bestStationary = null;
-        var bestStationaryDistanceSquared = double.MaxValue;
+        RoomEvent? latestStationary = null;
         RoomEvent? bestByDistance = null;
         var bestDistanceSquared = double.MaxValue;
         for (var i = loadIndex + 1; i < events.Count; i++)
@@ -1194,10 +1193,10 @@ public sealed class IntervalGenerator
                 }
 
                 var distanceSquared = DistanceSquared(spawnPoint, position);
-                if (IsStationaryPlayerPositionSample(current) && distanceSquared < bestStationaryDistanceSquared)
+                if (IsStationaryPlayerPositionSample(current) &&
+                    (latestStationary is null || current.Utc > latestStationary.Utc))
                 {
-                    bestStationary = current;
-                    bestStationaryDistanceSquared = distanceSquared;
+                    latestStationary = current;
                 }
 
                 if (distanceSquared < bestDistanceSquared)
@@ -1215,9 +1214,9 @@ public sealed class IntervalGenerator
             }
         }
 
-        if (bestStationary is not null)
+        if (latestStationary is not null)
         {
-            dynamicEnd = bestStationary;
+            dynamicEnd = latestStationary;
             dynamicEndIsStationary = true;
             return true;
         }

@@ -24,6 +24,7 @@ public static class SelfTests
             ("respawn attempt with another death is discarded", RespawnAttemptWithAnotherDeathIsDiscarded),
             ("room entry load ends at closest spawn sample", RoomEntryLoadEndsAtClosestSpawnSample),
             ("room entry stationary sample beats death reload", RoomEntryStationarySampleBeatsDeathReload),
+            ("room entry chooses latest stationary sample", RoomEntryChoosesLatestStationarySample),
             ("room entry death reload beats spawn sample", RoomEntryDeathReloadBeatsSpawnSample),
             ("room entry death reload ignores deaths outside window", RoomEntryDeathReloadIgnoresDeathsOutsideWindow),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
@@ -482,6 +483,31 @@ public static class SelfTests
         var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_player_position_end"));
         Assert(entryLoad.EndUtc == stationarySample, "stationary room-entry sample should beat death-reload and closer moving samples");
         Assert(!entryLoad.Reasons.Contains("room_entry_load_death_reload"), "stationary sample should keep the normal sample-end reason");
+    }
+
+    private static void RoomEntryChoosesLatestStationarySample()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var earlyStationarySample = start.AddMilliseconds(420);
+        var lateStationarySample = start.AddMilliseconds(820);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = earlyStationarySample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 101, 100, stationary: true) },
+            new() { EventType = "player_position_sample", Utc = lateStationarySample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 150, 100, stationary: true) }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 500,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_player_position_end"));
+        Assert(entryLoad.EndUtc == lateStationarySample, "room-entry stationary samples should choose the latest stationary frame");
     }
 
     private static void RoomEntryDeathReloadIgnoresDeathsOutsideWindow()
