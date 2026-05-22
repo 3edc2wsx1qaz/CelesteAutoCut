@@ -5,7 +5,7 @@ namespace ObsClipSidecar;
 
 public sealed class IntervalGenerator
 {
-    private static readonly TimeSpan RoomEntryDeathReloadWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RoomEntryDeathReloadWindow = TimeSpan.FromSeconds(3);
 
     public ClipIntervalsDocument Generate(IReadOnlyList<RoomEvent> roomEvents, SessionManifest manifest, IntervalGenerationOptions? options = null)
     {

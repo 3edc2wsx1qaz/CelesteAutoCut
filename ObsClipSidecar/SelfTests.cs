@@ -489,7 +489,7 @@ public static class SelfTests
         var start = BaseUtc.AddSeconds(2);
         var load = start.AddMilliseconds(200);
         var closestSample = start.AddMilliseconds(420);
-        var lateDeath = load.AddMilliseconds(5_100);
+        var lateDeath = load.AddMilliseconds(3_100);
         var respawnLoad = lateDeath.AddMilliseconds(200);
         var events = new List<RoomEvent>
         {
