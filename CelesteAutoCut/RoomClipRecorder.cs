@@ -12,7 +12,7 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 60;
-    private const long PlayerPositionSampleStartDelayFrames = 44;
+    private const long PlayerPositionSampleStartDelayFrames = 60;
     private const long PlayerPositionSampleIntervalFrames = 10;
     private const long PlayerPositionSampleWindowFrames = 240;
     private const long FixedLoadPositionSampleDelayFrames = 60;
