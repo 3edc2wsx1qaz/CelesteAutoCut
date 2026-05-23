@@ -25,7 +25,8 @@ public static class SelfTests
             ("room entry load ends at closest spawn sample", RoomEntryLoadEndsAtClosestSpawnSample),
             ("room entry stationary sample beats death reload", RoomEntryStationarySampleBeatsDeathReload),
             ("room entry chooses latest stationary sample", RoomEntryChoosesLatestStationarySample),
-            ("room entry death reload beats spawn sample", RoomEntryDeathReloadBeatsSpawnSample),
+            ("room entry sample beats death reload", RoomEntrySampleBeatsDeathReload),
+            ("room entry death reload used without sample", RoomEntryDeathReloadUsedWithoutSample),
             ("room entry death reload ignores deaths outside window", RoomEntryDeathReloadIgnoresDeathsOutsideWindow),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
@@ -426,7 +427,7 @@ public static class SelfTests
         Assert(!doc.Warnings.Any(w => w.Contains("player_position_sample", StringComparison.Ordinal)), "player position samples should not create discard warnings");
     }
 
-    private static void RoomEntryDeathReloadBeatsSpawnSample()
+    private static void RoomEntrySampleBeatsDeathReload()
     {
         var start = BaseUtc.AddSeconds(2);
         var load = start.AddMilliseconds(200);
@@ -449,9 +450,36 @@ public static class SelfTests
             MaxAllowedAnchorGapMs = 1_500
         });
 
+        var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_player_position_end"));
+        Assert(entryLoad.EndUtc == closestSample, "room entry segment should keep the initial load_level -> player_position_sample range before the later death/reload");
+        Assert(entryLoad.EndOutputDurationMs == 2_420, "room entry sample end must not extend to the later respawn load");
+        Assert(!entryLoad.Reasons.Contains("room_entry_load_death_reload"), "player sample should beat death-reload when the reload is a different load");
+        Assert(doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == start.AddSeconds(2)), "successful attempt should remain separate after the reload");
+    }
+
+    private static void RoomEntryDeathReloadUsedWithoutSample()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var respawnLoad = start.AddSeconds(1);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "transition", Utc = start.AddSeconds(2), Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 500,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
         var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_death_reload"));
-        Assert(entryLoad.EndUtc == respawnLoad, "room entry death-reload segment should end at the reload, not the spawn sample");
-        Assert(entryLoad.EndOutputDurationMs == 3_000, "room entry death-reload segment must not add postroll or dynamic sample end");
+        Assert(entryLoad.EndUtc == respawnLoad, "room entry death-reload fallback should still end at the reload when no player sample exists");
         Assert(doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == start.AddSeconds(2)), "successful attempt should remain separate after the reload");
     }
 

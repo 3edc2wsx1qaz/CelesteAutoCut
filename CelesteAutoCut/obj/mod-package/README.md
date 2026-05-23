@@ -87,7 +87,7 @@ E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 <Celeste>/CelesteAutoCutReplays/room_event_yyyyMMdd-HHmmssfff.jsonl
 ```
 
-每次房间事件 session 会写入独立的 `room_event_<timestamp>.jsonl`；OBS helper 开始录制时不再清空 jsonl，而是在生成最终视频成功后删除本次匹配到的事件文件。helper 读取使用 Windows 共享读写方式，避免游戏端正在追加事件时出现 jsonl 被其他进程占用的错误。
+每次房间事件 session 会写入独立的 `room_event_<timestamp>.jsonl`；OBS helper 开始录制时不再清空 jsonl，生成最终视频成功后也会保留本次匹配到的事件文件，便于复盘和排查。helper 读取使用 Windows 共享读写方式，避免游戏端正在追加事件时出现 jsonl 被其他进程占用的错误。
 
 helper 工作目录：
 
@@ -151,7 +151,7 @@ helper 工作目录：
 - 事件时间上首尾相连且属于同一地图的候选区间会合并成一个 `merged_linear_interval`，不会删除 1ms 这类过短候选；这样既保留转场时间，又避免 ffmpeg 生成只有音频没有视频帧的超短 segment；
 - 如果最后一个保留片段的 `post-roll` 超出 OBS 实际录制文件尾，生成区间时会夹到录制文件末尾；只有事件本身已经超出录制文件时才继续标记为 `source_file_mapping_gap`。
 - 子进程资源释放：模组关闭时会终止 helper 进程树，等待 stdout/stderr 输出管道泵结束后再释放 `Process`；helper 调用 ffmpeg 时也会在等待退出后释放进程对象。
-- 对单独的 `room_enter -> load_level` 进房片段，helper 的结束点优先级是：当前帧和下一帧速度都为 0 的候选中时间更靠后的 `player_position_sample` > 进房 load 后约 3 秒内同房间 `death` 且随后同房间重新 `load_level` > 距离 spawn point 最近的非静止 `player_position_sample`。death-reload 命中时会保留 `room_enter -> load_level -> death -> load_level`，原因标记为 `room_entry_load_death_reload`；sample 命中时原因标记为 `room_entry_load_player_position_end`；只有缺少 spawn point 或采样时才回退到固定 `PostRollMs` delay，原因标记为 `room_entry_load_delay`。如果 `room_enter -> load_level` 后续马上由同一个 `load_level` 形成 `load_level -> transition/strawberry_collect/level_complete` 成功段，则两段按同一 load 边界直接合并，不再使用进房采样截断。
+- 对单独的 `room_enter -> load_level` 进房片段，helper 的结束点优先级是：当前帧和下一帧速度都为 0 的候选中时间更靠后的 `player_position_sample` > 距离 spawn point 最近的非静止 `player_position_sample` > 进房 load 后约 3 秒内同房间 `death` 且随后同房间重新 `load_level`。因此房间后续死亡、成功段来自另一次 `load_level` 时，只要初始 load 有对应 `player_position_sample`，仍会保留 `load_level -> player_position_sample`，原因标记为 `room_entry_load_player_position_end`；只有缺少采样时才回退为 `room_enter -> load_level -> death -> load_level`，原因标记为 `room_entry_load_death_reload`；缺少 spawn point 或采样且没有 death-reload 时才使用固定 `PostRollMs` delay，原因标记为 `room_entry_load_delay`。如果 `room_enter -> load_level` 后续马上由同一个 `load_level` 形成 `load_level -> transition/strawberry_collect/level_complete` 成功段，则两段按同一 load 边界直接合并，不再使用进房采样截断。
 - 折返抑制已取消：`A -> B -> A -> B`、支路返回、同名房间再进入都按同一套线性事件规则处理。
 
 最终拼接规则：

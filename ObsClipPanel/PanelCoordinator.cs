@@ -237,7 +237,6 @@ public sealed class PanelCoordinator : BackgroundService
                     ? $"Built final video with {intervals.Clips.Count} valid clip(s)."
                     : $"Built {assemblyOutputs.Count} map video(s) with {intervals.Clips.Count} valid clip(s)."
             });
-            DeleteRoomEventsLog(roomEventsPath);
             autoAssembleInFlight = false;
 
             return ApiResult.Ok("Built final video.", new
@@ -688,21 +687,6 @@ public sealed class PanelCoordinator : BackgroundService
         catch
         {
             return -1;
-        }
-    }
-
-    private static void DeleteRoomEventsLog(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-            // The final video is already built; cleanup is best effort if the game writes at the same instant.
         }
     }
 
