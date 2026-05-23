@@ -115,6 +115,8 @@ helper 工作目录：
 
 ## 当前默认性能策略
 
+参数代码位置速查见 [docs/clip-parameter-locations.md](docs/clip-parameter-locations.md)。
+
 - 房间事件记录和内置 OBS helper 作为自动剪辑核心路径始终启用。
 - 旧的输入录制/回放、`F5/F6/F7` 热键、成功通关逐帧输入导出已经移除，不再占用 CPU/内存，也不会出现在 Mod Options。
 - OBS helper 默认轮询间隔为 `1000ms`；房间状态文件最多约每秒刷新一次；`room_enter -> load_level` 的进房 load 会从 load 后第 45 帧开始观察人物坐标、持续约 8 秒、每 10 帧采一次，并只把一个最佳 `player_position_sample` 写入当前 `room_event_<timestamp>.jsonl`；非进房 `load_level` 仍只在 load 后固定第 60 帧写入一次人物坐标样本。helper 生成剪辑区间时，凡是可匹配到 `player_position_sample` 的 `load_level` 边界，都会改用该采样事件的时间戳。事件 jsonl 只保留剪辑判断需要的字段，删除冗余来源/原因/草莓属性/采样元信息，降低单行长度和磁盘写入量。
