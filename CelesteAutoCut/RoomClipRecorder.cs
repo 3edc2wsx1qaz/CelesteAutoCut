@@ -16,7 +16,7 @@ internal sealed class RoomClipRecorder {
     private const long PlayerPositionSampleIntervalFrames = 10;
     private const long PlayerPositionSampleWindowFrames = 480;
     private const long FixedLoadPositionSampleDelayFrames = 60;
-    private const int ConsecutiveStationarySampleFrames = 5;
+    private const int ConsecutiveStationarySampleFrames = 10;
     private const string EventLogPrefix = "room_event_";
     private const string EventLogExtension = ".jsonl";
     private const string StatusFileName = "room_clip_session.json";
