@@ -477,6 +477,12 @@ public sealed class IntervalGenerator
                     i++;
                 }
 
+                // OBS recording can be stopped while the game is still inside the
+                // room, so no exit/session-end event may arrive. Keep the final
+                // matched room_enter -> load_level intro as a real clip instead
+                // of requiring a terminal exit signal.
+                EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
+
                 if (sessionDone)
                 {
                     break;

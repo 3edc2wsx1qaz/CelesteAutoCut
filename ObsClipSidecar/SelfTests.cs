@@ -46,6 +46,7 @@ public static class SelfTests
             ("backtrack bounce is not suppressed", BacktrackBounceIsNotSuppressed),
             ("branch return to hub room is kept", BranchReturnToHubRoomIsKept),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
+            ("interrupted recording keeps final room-entry intro without exit", InterruptedRecordingKeepsFinalRoomEntryIntroWithoutExit),
             ("postroll at recording end is clamped", PostrollAtRecordingEndIsClamped),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
             ("invalid anchor gaps are reported", InvalidAnchorGap),
@@ -1064,6 +1065,33 @@ public static class SelfTests
         Assert(doc.Clips.Count == 1, "expected only trailing intro clip for unfinished room");
         Assert(doc.Clips[0].Reasons.Contains("room_entry_load"), "unfinished room should emit room_entry_load clip");
         Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == introLoad, "unfinished intro boundaries mismatch");
+    }
+
+    private static void InterruptedRecordingKeepsFinalRoomEntryIntroWithoutExit()
+    {
+        var firstStart = BaseUtc.AddSeconds(2);
+        var firstLoad = firstStart.AddMilliseconds(300);
+        var finalStart = BaseUtc.AddSeconds(5);
+        var finalLoad = finalStart.AddMilliseconds(350);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = firstStart, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = firstLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "exit", Utc = firstStart.AddSeconds(1), Room = "a", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = finalStart, Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = finalLoad, Room = "b", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var finalIntro = doc.Clips.SingleOrDefault(c => c.StartUtc == finalStart && c.EndUtc == finalLoad);
+        Assert(finalIntro is not null, "final room_enter -> load_level must be kept even when recording stops before an exit event arrives");
+        Assert(finalIntro!.Reasons.Contains("room_entry_load"), "interrupted final intro should keep the room_entry_load reason");
     }
 
     private static void MissingRecordingFileMapping()
