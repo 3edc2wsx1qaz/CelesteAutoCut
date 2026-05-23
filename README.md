@@ -48,13 +48,15 @@ helper 会随游戏启动，游戏退出后也会自动退出。
 ## 快速开始
 
 1. 启动 OBS Studio。
-2. 启动 Celeste，并确认 Everest 已加载 CelesteAutoCut。
-3. 在 OBS 中开始录制，推荐录制为 `.mkv`。
+2. 在 OBS 中开始录制，推荐录制为 `.mkv`。
+3. 启动 Celeste，并确认 Everest 已加载 CelesteAutoCut。
 4. 正常游玩。
 5. 停止 OBS 录制。
 6. 等待 helper 自动生成最终视频。
 
 默认情况下，停止 OBS 录制后会自动合成最终视频；不需要手动导出回放，也不需要按额外热键。多次录制会生成多个视频，目前暂无自动将一个地图多次录制的视频自动合并为一个视频的功能。
+
+**注意**: 如果你在进入关卡后开始录制，请手动重试一次以保证进入关卡后的第一个房间被成功录制。
 
 ## OBS 面板
 
@@ -152,10 +154,6 @@ OBS helper 的工作目录是：
 - `selected_clips.json` / `selected_clips.log`：本次合成实际采用的片段；
 - `assembly/assembly_report.json`：ffmpeg 合成结果和最终输出路径。
 
-`输出日志` 关闭时，成功生成最终视频后会自动清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr，以及本次录制对应的 `obs_auto/sessions/<session-id>/` 临时工作目录；开启后会保留。清理后的活动日志不会被后续延迟到达的 `player_position_sample` 重新创建成 sample-only 残片，保留下来的 `room_event_*.jsonl` 应始终是完整事件日志。
-
-剪辑算法会始终保留最后匹配到的 `room_enter -> load_level` 进房 intro 片段；即使后续没有找到可配对的 `load_level -> transition / strawberry_collect / level_complete` 成功段，也不要求必须收到 `exit`。因此 OBS 录制在房间内被直接中断、没有 Celeste `exit` 信号时，末尾这段 intro 仍会保留。停止 OBS 录制后，helper 会先请求游戏端把当前已经观测到的最优 `player_position_sample` 立即写入日志，再开始自动合成，避免末尾 sample 晚于合成。起始边界优先选择 `session_start`；没有 `session_start` 时选择第一个 `room_enter`；如果缺少 `room_enter`，会用第一个 load / `player_position_sample` 合成一个入口片段继续匹配。单独的末尾 `room_enter -> load_level` 片段会直接使用对应 `player_position_sample` 的时间戳作为终点；没有 sample 时使用 load 后延迟并按录制文件末尾截断。
-
 ## 常见问题
 
 ### 停止 OBS 录制后没有最终视频
@@ -205,3 +203,4 @@ helper 会优先使用你在面板里设置的 `ffmpeg.exe`。如果没有设置
 
 - [] 支持将同一个地图录制的多段视频合成一个视频
 - [] 支持自动识别炼金等特殊场景
+- [] 支持以任意顺序在任意时间启动 OBS 和 Celeste
