@@ -12,9 +12,9 @@ namespace Celeste.Mod.CelesteAutoCut;
 
 internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 60;
-    private const long PlayerPositionSampleStartDelayFrames = 0;
+    private const long PlayerPositionSampleStartDelayFrames = 45;
     private const long PlayerPositionSampleIntervalFrames = 10;
-    private const long PlayerPositionSampleWindowFrames = 480;
+    private const long PlayerPositionSampleWindowFrames = 300;
     private const long FixedLoadPositionSampleDelayFrames = 60;
     private const string EventLogPrefix = "room_event_";
     private const string EventLogExtension = ".jsonl";
@@ -357,7 +357,7 @@ internal sealed class RoomClipRecorder {
         ResolvePendingPlayerPositionSample(isStationary);
         var spawnPoint = playerPositionSampleSpawnPoint.Value;
         if (playerPositionSampleMode == PlayerPositionSampleMode.FixedFrameAfterLoad) {
-            bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, player.Position, spawnPoint, isStationary: null);
+            bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, player.Position, spawnPoint, isStationary: null, DateTime.UtcNow.ToString("O"), gameFrame);
             FlushPlayerPositionSample();
             ClearPlayerPositionSampling();
             return;
@@ -370,12 +370,13 @@ internal sealed class RoomClipRecorder {
 
         lastPlayerPositionSampleFrame = gameFrame;
         var distanceSquared = DistanceSquared(player.Position, spawnPoint);
+        var sampleUtc = DateTime.UtcNow.ToString("O");
         if (isStationary) {
-            pendingPlayerPositionSample = new PendingPlayerPositionSample(room, player.Position, spawnPoint, distanceSquared, gameFrame);
+            pendingPlayerPositionSample = new PendingPlayerPositionSample(room, player.Position, spawnPoint, distanceSquared, gameFrame, sampleUtc);
             return;
         }
 
-        RecordPlayerPositionSample(room, player.Position, spawnPoint, isStationary: false, distanceSquared, gameFrame);
+        RecordPlayerPositionSample(room, player.Position, spawnPoint, isStationary: false, distanceSquared, gameFrame, sampleUtc);
     }
 
     private void ResolvePendingPlayerPositionSample(bool nextFrameIsStationary) {
@@ -385,10 +386,10 @@ internal sealed class RoomClipRecorder {
 
         var pending = pendingPlayerPositionSample.Value;
         pendingPlayerPositionSample = null;
-        RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, nextFrameIsStationary, pending.DistanceSquared, pending.GameFrame);
+        RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, nextFrameIsStationary, pending.DistanceSquared, pending.GameFrame, pending.Utc);
     }
 
-    private void RecordPlayerPositionSample(string room, Vector2 playerPosition, Vector2 spawnPoint, bool isStationary, double distanceSquared, long sampleFrame) {
+    private void RecordPlayerPositionSample(string room, Vector2 playerPosition, Vector2 spawnPoint, bool isStationary, double distanceSquared, long sampleFrame, string sampleUtc) {
         if (!IsBetterPlayerPositionSample(isStationary, distanceSquared, sampleFrame)) {
             return;
         }
@@ -396,10 +397,10 @@ internal sealed class RoomClipRecorder {
         bestPlayerPositionSampleIsStationary = isStationary;
         bestPlayerPositionSampleDistanceSquared = distanceSquared;
         bestPlayerPositionSampleFrame = sampleFrame;
-        bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, playerPosition, spawnPoint, isStationary);
+        bestPlayerPositionSampleEvent = CreatePlayerPositionSampleEvent(room, playerPosition, spawnPoint, isStationary, sampleUtc, sampleFrame);
     }
 
-    private RoomClipEvent CreatePlayerPositionSampleEvent(string room, Vector2 playerPosition, Vector2 spawnPoint, bool? isStationary) {
+    private RoomClipEvent CreatePlayerPositionSampleEvent(string room, Vector2 playerPosition, Vector2 spawnPoint, bool? isStationary, string sampleUtc, long sampleFrame) {
         return CreateEvent(RoomClipEventTypes.PlayerPositionSample, room, notes: new Dictionary<string, string?> {
             ["loadEventId"] = playerPositionSampleLoadEventId,
             ["x"] = playerPosition.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -407,7 +408,7 @@ internal sealed class RoomClipRecorder {
             ["spawnPointX"] = spawnPoint.X.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["spawnPointY"] = spawnPoint.Y.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["stationary"] = isStationary?.ToString()
-        });
+        }, utcOverride: sampleUtc, gameFrameOverride: sampleFrame);
     }
 
     private void ClearPlayerPositionSampling() {
@@ -436,12 +437,12 @@ internal sealed class RoomClipRecorder {
         return entry;
     }
 
-    private RoomClipEvent CreateEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null) {
+    private RoomClipEvent CreateEvent(string eventType, string? room, string? nextRoom = null, Dictionary<string, string?>? notes = null, string? utcOverride = null, long? gameFrameOverride = null) {
         Directory.CreateDirectory(replayController.ReplayDirectory);
         return new RoomClipEvent {
             EventType = eventType,
             EventId = eventType == RoomClipEventTypes.LoadLevel ? Guid.NewGuid().ToString("N") : null,
-            Utc = DateTime.UtcNow.ToString("O"),
+            Utc = utcOverride ?? DateTime.UtcNow.ToString("O"),
             SessionId = sessionId,
             AttemptId = attemptId,
             MapSid = mapSid,
@@ -450,7 +451,7 @@ internal sealed class RoomClipRecorder {
             Room = room,
             NextRoom = nextRoom,
             ChapterTimeMs = TryGetChapterTimeMs(),
-            GameFrame = gameFrame,
+            GameFrame = gameFrameOverride ?? gameFrame,
             Notes = CompactNotes(notes)
         };
     }
@@ -618,6 +619,7 @@ internal sealed class RoomClipRecorder {
         Vector2 PlayerPosition,
         Vector2 SpawnPoint,
         double DistanceSquared,
-        long GameFrame);
+        long GameFrame,
+        string Utc);
 
 }

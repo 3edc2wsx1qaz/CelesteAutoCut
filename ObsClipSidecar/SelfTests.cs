@@ -27,6 +27,7 @@ public static class SelfTests
             ("room entry chooses latest stationary sample", RoomEntryChoosesLatestStationarySample),
             ("room entry sample beats death reload", RoomEntrySampleBeatsDeathReload),
             ("room entry death reload used without sample", RoomEntryDeathReloadUsedWithoutSample),
+            ("room entry death reload uses reload sample boundary", RoomEntryDeathReloadUsesReloadSampleBoundary),
             ("room entry death reload ignores deaths outside window", RoomEntryDeathReloadIgnoresDeathsOutsideWindow),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
@@ -481,6 +482,39 @@ public static class SelfTests
         var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_death_reload"));
         Assert(entryLoad.EndUtc == respawnLoad, "room entry death-reload fallback should still end at the reload when no player sample exists");
         Assert(doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == start.AddSeconds(2)), "successful attempt should remain separate after the reload");
+    }
+
+    private static void RoomEntryDeathReloadUsesReloadSampleBoundary()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var respawnLoad = start.AddSeconds(1);
+        var reloadSample = respawnLoad.AddMilliseconds(180);
+        var clear = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(800), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "respawn-load", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = reloadSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("respawn-load", 100, 100) },
+            new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_death_reload"));
+        Assert(entryLoad.EndUtc == reloadSample, "room-entry death-reload fallback should use the reload load_level player sample as its end timestamp");
+        Assert(entryLoad.Reasons.Contains("load_level_player_position_end"), "reload sample end should be annotated as a load_level player-position boundary");
+
+        var success = doc.Clips.Single(c => c.Reasons.Contains("final_successful_attempt"));
+        Assert(success.StartUtc == reloadSample, "successful attempt should use the same reload load_level player sample as its start timestamp");
+        Assert(success.Reasons.Contains("load_level_player_position_start"), "reload sample start should be annotated as a load_level player-position boundary");
     }
 
     private static void RoomEntryStationarySampleBeatsDeathReload()

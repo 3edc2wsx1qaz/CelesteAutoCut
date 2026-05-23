@@ -41,12 +41,13 @@ public sealed class IntervalGenerator
             var timedCandidate = candidate;
             var usesDynamicRoomEntryEnd = false;
             var usesDynamicLoadLevelStart = false;
+            var usesDynamicLoadLevelEnd = false;
             if (IsStandaloneRoomEntryLoad(candidate))
             {
-                var hasSample = TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var dynamicEnd, out _);
+                var hasSample = TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var roomEntryDynamicEnd, out _);
                 if (hasSample)
                 {
-                    timedCandidate = candidate with { End = dynamicEnd };
+                    timedCandidate = candidate with { End = roomEntryDynamicEnd };
                     usesDynamicRoomEntryEnd = true;
                 }
                 else if (TryFindRoomEntryDeathReloadEnd(sortedEvents, candidate.End, out var reloadEnd))
@@ -55,12 +56,19 @@ public sealed class IntervalGenerator
                 }
             }
 
-            if (!candidate.IsCheckpointIntro &&
-                IsLoadLevelStart(timedCandidate) &&
-                TryFindLoadLevelPlayerPositionStart(timedCandidate.Start, sortedEvents, out var dynamicStart))
+            if (IsLoadLevelStart(timedCandidate) &&
+                TryFindLoadLevelPlayerPositionBoundary(timedCandidate.Start, sortedEvents, out var dynamicStart))
             {
                 timedCandidate = timedCandidate with { Start = dynamicStart };
                 usesDynamicLoadLevelStart = true;
+            }
+
+            if (!usesDynamicRoomEntryEnd &&
+                IsLoadLevelEnd(timedCandidate) &&
+                TryFindLoadLevelPlayerPositionBoundary(timedCandidate.End, sortedEvents, out var dynamicEnd))
+            {
+                timedCandidate = timedCandidate with { End = dynamicEnd };
+                usesDynamicLoadLevelEnd = true;
             }
 
             var startEstimate = EstimateBoundary(timedCandidate.Start.Utc, manifest, options.MaxAllowedAnchorGapMs);
@@ -74,6 +82,10 @@ public sealed class IntervalGenerator
             if (usesDynamicLoadLevelStart)
             {
                 annotations.Add("load_level_player_position_start");
+            }
+            if (usesDynamicLoadLevelEnd)
+            {
+                annotations.Add("load_level_player_position_end");
             }
 
             if (!startEstimate.IsValid)
@@ -1077,10 +1089,13 @@ public sealed class IntervalGenerator
     private static bool IsLoadLevelStart(ClipCandidate candidate)
         => string.Equals(candidate.Start.EventType, "load_level", StringComparison.Ordinal);
 
+    private static bool IsLoadLevelEnd(ClipCandidate candidate)
+        => string.Equals(candidate.End.EventType, "load_level", StringComparison.Ordinal);
+
     private static bool IsStandaloneRoomEntryLoad(ClipCandidate candidate)
         => string.Equals(candidate.BaseValidReason, "room_entry_load", StringComparison.Ordinal);
 
-    private static bool TryFindLoadLevelPlayerPositionStart(RoomEvent loadLevel, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicStart)
+    private static bool TryFindLoadLevelPlayerPositionBoundary(RoomEvent loadLevel, IReadOnlyList<RoomEvent> events, out RoomEvent dynamicStart)
     {
         dynamicStart = loadLevel;
         var loadIndex = -1;
