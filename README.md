@@ -1,4 +1,4 @@
-# CelesteAutoCut
+﻿# CelesteAutoCut
 
 CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** 自动生成“只保留有效游玩片段”的通关视频。
 
@@ -32,16 +32,6 @@ D:\Steam\steamapps\common\Celeste\Mods\CelesteAutoCut.zip
 ```
 
 游戏退出后，helper 会跟随父进程自动退出。
-
----
-
-## 游戏内 Mod Options
-
-当前游戏内设置页只保留一个选项：
-
-- `Output Directory` / `输出目录`：最终剪辑视频的输出根目录。留空时使用 OBS 录制目录；填写后，每张地图仍会输出到该目录下对应地图名子文件夹。
-
-旧的 `F5/F6/F7` 输入录制/回放热键、逐帧成功通关导出、内部 helper 路径等选项已经从 Mod Options 移除，避免设置页被长文本撑偏。
 
 ---
 
