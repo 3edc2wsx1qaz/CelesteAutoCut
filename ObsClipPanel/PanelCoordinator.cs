@@ -237,6 +237,7 @@ public sealed class PanelCoordinator : BackgroundService
                     ? $"Built final video with {intervals.Clips.Count} valid clip(s)."
                     : $"Built {assemblyOutputs.Count} map video(s) with {intervals.Clips.Count} valid clip(s)."
             });
+            CleanupLogsAfterSuccessfulBuild(settings, paths, roomEventsPath);
             autoAssembleInFlight = false;
 
             return ApiResult.Ok("Built final video.", new
@@ -822,6 +823,67 @@ public sealed class PanelCoordinator : BackgroundService
         var textPath = Path.Combine(paths.SessionDirectory, "selected_clips.log");
         if (File.Exists(jsonPath)) File.Delete(jsonPath);
         if (File.Exists(textPath)) File.Delete(textPath);
+    }
+
+    private static void CleanupLogsAfterSuccessfulBuild(PanelSettings settings, SessionPaths paths, string? roomEventsPath)
+    {
+        if (settings.LogOutputEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            TryDeleteFile(roomEventsPath);
+            TryDeleteFile(paths.ObsEventsPath);
+            TryDeleteFile(paths.SessionManifestPath);
+            TryDeleteFile(paths.ClipIntervalsPath);
+            TryDeleteFile(Path.Combine(paths.SessionDirectory, "selected_clips.json"));
+            TryDeleteFile(Path.Combine(paths.SessionDirectory, "selected_clips.log"));
+            CleanupAssemblyLogs(paths.AssemblyDirectory);
+            TryDeleteFile(Path.Combine(settings.WorkingDirectory, "obs-auto-stdout.log"));
+            TryDeleteFile(Path.Combine(settings.WorkingDirectory, "obs-auto-stderr.log"));
+        }
+        catch
+        {
+            // Log cleanup is best-effort and must not turn a successful video build into a failure.
+        }
+    }
+
+    private static void CleanupAssemblyLogs(string assemblyDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyDirectory) || !Directory.Exists(assemblyDirectory))
+        {
+            return;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(assemblyDirectory, "*", SearchOption.AllDirectories).Prepend(assemblyDirectory))
+        {
+            TryDeleteFile(Path.Combine(directory, "assembly_report.json"));
+            TryDeleteFile(Path.Combine(directory, "map_outputs.json"));
+            TryDeleteFile(Path.Combine(directory, "clip_plan.ffconcat"));
+            TryDeleteFile(Path.Combine(directory, "precise_segments.ffconcat"));
+        }
+    }
+
+    private static void TryDeleteFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Log cleanup is best-effort and must not turn a successful video build into a failure.
+        }
     }
 
     private static object ToClipSelectionEntry(ClipInterval clip) => new

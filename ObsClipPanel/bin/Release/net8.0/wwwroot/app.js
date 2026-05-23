@@ -1,7 +1,7 @@
 ﻿const ids = [
   'obsUrl','obsPassword','workingDirectory','roomEventsPath','outputDirectory','ffmpegPath','finalOutputName',
   'pollIntervalMs','preRollMs','postRollMs','maxAnchorGapMs','maxCutErrorMs',
-  'splitOnPause','requireExistingFiles','autoAssembleOnStop'
+  'splitOnPause','requireExistingFiles','autoAssembleOnStop','logOutputEnabled'
 ];
 
 const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
@@ -35,6 +35,7 @@ function fillSettings(settings) {
   el.splitOnPause.checked = !!settings.splitOnPause;
   el.requireExistingFiles.checked = !!settings.requireExistingFiles;
   el.autoAssembleOnStop.checked = !!settings.autoAssembleOnStop;
+  el.logOutputEnabled.checked = !!settings.logOutputEnabled;
 }
 
 function readSettings() {
@@ -53,7 +54,8 @@ function readSettings() {
     maxCutErrorMs: Number(el.maxCutErrorMs.value || 100),
     splitOnPause: el.splitOnPause.checked,
     requireExistingFiles: el.requireExistingFiles.checked,
-    autoAssembleOnStop: el.autoAssembleOnStop.checked
+    autoAssembleOnStop: el.autoAssembleOnStop.checked,
+    logOutputEnabled: el.logOutputEnabled.checked
   };
 }
 

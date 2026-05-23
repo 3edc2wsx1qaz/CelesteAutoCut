@@ -92,6 +92,7 @@ internal sealed class ObsAutoAssemblerLauncher {
             startInfo.Environment["CELESTE_REPLAY_ROOM_EVENTS_PATH"] = roomEventsPath;
             startInfo.Environment["CELESTE_REPLAY_AUTO_ASSEMBLE_ON_STOP"] = "true";
             startInfo.Environment["CELESTE_REPLAY_REQUIRE_EXISTING_FILES"] = "true";
+            startInfo.Environment["CELESTE_REPLAY_LOG_OUTPUT_ENABLED"] = CelesteAutoCutModule.Settings.LogOutputEnabled ? "true" : "false";
             startInfo.Environment["CELESTE_REPLAY_PARENT_PID"] = Environment.ProcessId.ToString();
             startInfo.Environment["CELESTE_REPLAY_PARENT_START_TICKS"] = Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks.ToString();
             if (!string.IsNullOrWhiteSpace(CelesteAutoCutModule.Settings.OutputDirectory)) {
@@ -128,8 +129,13 @@ internal sealed class ObsAutoAssemblerLauncher {
                 stopping = false;
             }
 
-            Task stdoutPump = PumpOutputAsync(startedProcess.StandardOutput, stdoutPath);
-            Task stderrPump = PumpOutputAsync(startedProcess.StandardError, stderrPath);
+            bool logOutputEnabled = CelesteAutoCutModule.Settings.LogOutputEnabled;
+            Task stdoutPump = logOutputEnabled
+                ? PumpOutputAsync(startedProcess.StandardOutput, stdoutPath)
+                : DrainOutputAsync(startedProcess.StandardOutput);
+            Task stderrPump = logOutputEnabled
+                ? PumpOutputAsync(startedProcess.StandardError, stderrPath)
+                : DrainOutputAsync(startedProcess.StandardError);
             lock (gate) {
                 if (ReferenceEquals(process, startedProcess)) {
                     stdoutPumpTask = stdoutPump;
@@ -201,6 +207,22 @@ internal sealed class ObsAutoAssemblerLauncher {
         }
     }
 
+    private static async Task DrainOutputAsync(StreamReader reader) {
+        try {
+            while (!reader.EndOfStream) {
+                if (await reader.ReadLineAsync() == null) {
+                    break;
+                }
+            }
+        } catch (ObjectDisposedException) {
+            // The helper process can be killed during shutdown while the stream is still draining.
+        } catch (InvalidOperationException) {
+            // StandardOutput/StandardError may already be closed by Process disposal.
+        } catch (IOException) {
+            // Pipe closed during normal process termination.
+        }
+    }
+
     private static async Task DisposeAfterPumpsAsync(Process process, Task? stdoutPumpTask, Task? stderrPumpTask) {
         try {
             await WaitForPumpTasksAsync(stdoutPumpTask, stderrPumpTask).ConfigureAwait(false);
@@ -247,6 +269,10 @@ internal sealed class ObsAutoAssemblerLauncher {
     }
 
     private static void Log(string message, LogLevel level = LogLevel.Info) {
+        if (level < LogLevel.Warn && !CelesteAutoCutModule.Settings.LogOutputEnabled) {
+            return;
+        }
+
         Logger.Log(level, Tag, message);
         if (level >= LogLevel.Warn) {
             try {

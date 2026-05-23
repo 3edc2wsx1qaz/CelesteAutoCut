@@ -10,4 +10,6 @@ public class CelesteAutoCutSettings : EverestModuleSettings {
     }
 
     public string OutputDirectory { get; set; } = "";
+
+    public bool LogOutputEnabled { get; set; }
 }

@@ -16,6 +16,7 @@ public sealed record PanelSettings
     public bool SplitOnPause { get; init; } = true;
     public bool RequireExistingFiles { get; init; } = true;
     public bool AutoAssembleOnStop { get; init; } = true;
+    public bool LogOutputEnabled { get; init; }
     public string FinalOutputName { get; init; } = "{recording_start_local}.mp4";
 }
 
@@ -35,6 +36,7 @@ public sealed record PanelSettingsInput
     public bool SplitOnPause { get; init; } = true;
     public bool RequireExistingFiles { get; init; } = true;
     public bool AutoAssembleOnStop { get; init; } = true;
+    public bool LogOutputEnabled { get; init; }
     public string FinalOutputName { get; init; } = "{recording_start_local}.mp4";
 }
 
@@ -54,6 +56,7 @@ public sealed record PanelSettingsView
     public bool SplitOnPause { get; init; }
     public bool RequireExistingFiles { get; init; }
     public bool AutoAssembleOnStop { get; init; }
+    public bool LogOutputEnabled { get; init; }
     public string FinalOutputName { get; init; } = "";
 }
 

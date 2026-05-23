@@ -44,6 +44,7 @@ public sealed class PanelStateStore
             SplitOnPause = current.SplitOnPause,
             RequireExistingFiles = current.RequireExistingFiles,
             AutoAssembleOnStop = current.AutoAssembleOnStop,
+            LogOutputEnabled = current.LogOutputEnabled,
             FinalOutputName = current.FinalOutputName
         };
     }
@@ -114,6 +115,7 @@ public sealed class PanelStateStore
             SplitOnPause = input.SplitOnPause,
             RequireExistingFiles = input.RequireExistingFiles,
             AutoAssembleOnStop = input.AutoAssembleOnStop,
+            LogOutputEnabled = input.LogOutputEnabled,
             FinalOutputName = NormalizeConfiguredFinalOutputName(input.FinalOutputName)
         };
 
@@ -338,6 +340,7 @@ public sealed class PanelStateStore
             SplitOnPause = ReadBool("CELESTE_REPLAY_SPLIT_ON_PAUSE") ?? settings.SplitOnPause,
             RequireExistingFiles = ReadBool("CELESTE_REPLAY_REQUIRE_EXISTING_FILES") ?? settings.RequireExistingFiles,
             AutoAssembleOnStop = ReadBool("CELESTE_REPLAY_AUTO_ASSEMBLE_ON_STOP") ?? settings.AutoAssembleOnStop,
+            LogOutputEnabled = ReadBool("CELESTE_REPLAY_LOG_OUTPUT_ENABLED") ?? settings.LogOutputEnabled,
             FinalOutputName = NormalizeConfiguredFinalOutputName(Read("CELESTE_REPLAY_FINAL_OUTPUT_NAME") ?? settings.FinalOutputName)
         };
     }
