@@ -207,6 +207,8 @@ D:\Steam\steamapps\common\Celeste\Mods
 
 ## 开发 / 打包
 
+打包发布命令速查见 [docs/package-release-commands.md](docs/package-release-commands.md)。
+
 发布命令：
 
 ```powershell
