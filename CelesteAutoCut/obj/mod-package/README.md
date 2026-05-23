@@ -1,53 +1,95 @@
 # CelesteAutoCut
 
-CelesteAutoCut 是一个 **Celeste / Everest 模组**，配合 **OBS Studio** 自动生成“只保留有效游玩片段”的通关视频。
+CelesteAutoCut 是一个用于 **Celeste / Everest** 的自动剪辑模组。它会结合 Celeste 的房间事件和 OBS 的录制时间轴，把一整段录制自动剪成只保留有效游玩片段的成片。
 
-典型流程：
+适合这些场景：
 
-1. 启动 Celeste 和 OBS Studio。
-2. 在 OBS 中开始录制（推荐 `.mkv`）。
-3. 正常游玩；停止 OBS 录制后，helper 会自动生成最终视频。
+- 录制练图、通关、跑图过程后，自动去掉死亡尝试和无效等待；
+- 按地图分别输出最终视频；
+- 保留转场、进房、草莓收集、通关等关键片段；
+- 用 OBS 正常录制，不需要改变游玩习惯。
 
+## 运行需求
 
----
+- Windows x64
+- Celeste + Everest
+- OBS Studio
+- OBS WebSocket 已启用
+- 首次自动合成视频时需要可用的 `ffmpeg.exe`
+
+OBS 28 及以上通常自带 WebSocket。请在 OBS 中打开：
+
+```text
+Tools -> WebSocket Server Settings
+```
+
+勾选 `Enable WebSocket server`，默认端口为 `4455`。如果设置了密码，稍后在 CelesteAutoCut 面板中填同一个密码。
 
 ## 安装
 
-把发布包放到：
+从 GitHub Releases 下载 `CelesteAutoCut.zip`，放到 Celeste 的 `Mods` 目录：
 
 ```text
 <Celeste>/Mods/CelesteAutoCut.zip
 ```
 
-例如：
+Steam 默认路径通常是：
 
 ```text
 D:\Steam\steamapps\common\Celeste\Mods\CelesteAutoCut.zip
 ```
 
-首次运行时，模组会把内置 helper 解压到：
+然后启动 Celeste。首次运行时，模组会自动释放内置 OBS helper 到：
 
 ```text
 <Celeste>/CelesteAutoCutTools/ObsClipPanel/
 ```
 
-游戏退出后，helper 会跟随父进程自动退出。
+helper 会随游戏启动，游戏退出后也会自动退出。
 
----
+## 快速开始
 
-## 游戏内 Mod Options
+1. 启动 OBS Studio。
+2. 启动 Celeste，并确认 Everest 已加载 CelesteAutoCut。
+3. 在 OBS 中开始录制，推荐录制为 `.mkv`。
+4. 正常游玩。
+5. 停止 OBS 录制。
+6. 等待 helper 自动生成最终视频。
 
-当前游戏内设置页只保留一个选项：
+默认情况下，停止 OBS 录制后会自动合成最终视频；不需要手动导出回放，也不需要按额外热键。
 
-- `Output Directory` / `输出目录`：最终剪辑视频的输出根目录。留空时使用 OBS 录制目录；填写后，每张地图仍会输出到该目录下对应地图名子文件夹。
+## OBS 面板
 
-旧的 `F5/F6/F7` 输入录制/回放热键、逐帧成功通关导出、内部 helper 路径等选项已经从 Mod Options 移除，避免设置页被长文本撑偏。
+CelesteAutoCut 会在本机启动一个 helper 面板：
 
----
+```text
+http://127.0.0.1:38500
+```
 
-## 输出位置与命名
+你可以把它添加到 OBS Custom Browser Dock：
 
-最终视频默认使用 **录制开始的本地时间** 命名，格式为：
+```text
+View -> Docks -> Custom Browser Docks...
+```
+
+新增一个 dock：
+
+```text
+Name: Celeste Auto Cut
+URL:  http://127.0.0.1:38500
+```
+
+面板可以用于：
+
+- 连接 OBS WebSocket；
+- 查看当前录制状态和 session 路径；
+- 手动开始、停止、暂停、继续录制；
+- 手动触发“生成最终视频”；
+- 设置 OBS WebSocket 密码、输出目录、`ffmpeg.exe` 路径和最终文件名模板。
+
+## 输出位置
+
+最终视频默认使用录制开始的本地时间命名：
 
 ```text
 yyyy-MM-dd HH-mm-ss.mp4
@@ -61,206 +103,122 @@ yyyy-MM-dd HH-mm-ss.mp4
 
 输出目录优先级：
 
-1. 游戏内 Mod Options 的 `Output Directory` / `输出目录`（留空则跳过）；
-2. 本次 OBS 实际录制文件所在目录；
+1. 游戏内 Mod Options 的 `Output Directory` / `输出目录`；
+2. 本次 OBS 录制文件所在目录；
 3. OBS 当前配置的默认录制目录；
-4. helper 工作目录（兜底）。
+4. helper 工作目录。
 
-最终视频会写入上述目录下的 **地图名子文件夹**，文件夹名取地图 SID 的最后一段，并清理为合法文件名。例如：
+最终视频会放进地图名子文件夹。例如：
 
 ```text
 E:\obs_video\1-ForsakenCity\2026-05-19 20-31-08.mp4
 E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 ```
 
-如果手动把最终文件名配置成绝对路径，单地图录制会尊重该绝对路径；若同一次录制跨多个地图且绝对路径会互相覆盖，helper 会自动在该绝对路径所在目录下追加地图子文件夹，避免多个地图成片写到同一个文件。
+如果同一次 OBS 录制跨了多个地图，CelesteAutoCut 会按地图分别输出多个视频，避免互相覆盖。
 
-如果一次 OBS 录制里出现多个不同地图 SID，helper 会按地图分组分别输出多个视频。每个视频仍使用同一个录制开始本地时间作为文件名，并分别进入自己的地图名文件夹。
+## 游戏内设置
 
----
+在 Everest 的 Mod Options 里可以设置：
 
-## 中间产物与排查路径
+| 选项 | 说明 |
+| --- | --- |
+| `Output Directory` / `输出目录` | 最终剪辑视频的输出根目录。留空时使用 OBS 录制目录。每张地图仍会输出到对应地图名子文件夹。 |
+| `Output Logs` / `输出日志` | 默认关闭。开启后会保留 room event、OBS event、clip intervals、片段选择、assembly 报告、ffconcat 和 helper stdout/stderr 日志，方便排查问题。 |
 
-房间事件日志：
+## 中间文件和日志
+
+房间事件写在：
 
 ```text
 <Celeste>/CelesteAutoCutReplays/room_event_yyyyMMdd-HHmmssfff.jsonl
 ```
 
-每次房间事件 session 会写入独立的 `room_event_<timestamp>.jsonl`；OBS helper 开始录制时不再清空 jsonl。`输出日志 / LogOutputEnabled` 默认关闭：生成最终视频成功后会自动删除本次匹配到的 `room_event_*.jsonl`、OBS 事件、区间、片段选择、assembly 报告/ffconcat 以及 helper stdout/stderr 日志；开启后才保留这些日志，便于复盘和排查。helper 读取使用 Windows 共享读写方式，避免游戏端正在追加事件时出现 jsonl 被其他进程占用的错误。
-
-helper 工作目录：
+OBS helper 的工作目录是：
 
 ```text
 <Celeste>/CelesteAutoCutReplays/obs_auto/
 ```
 
-每次录制会生成一个 session：
+每次录制会创建一个 session：
 
 ```text
 <Celeste>/CelesteAutoCutReplays/obs_auto/sessions/<session-id>/
 ```
 
-常见文件：
+常见排查文件：
 
-- `obs_events.jsonl`：OBS 事件与录制时间轴采样；
+- `obs_events.jsonl`：OBS 录制事件和时间轴采样；
 - `session_manifest.json`：录制段、文件、时间锚点；
-- `clip_intervals.json`：计算后的有效房间片段；
-- `selected_clips.json` / `selected_clips.log`：每次生成最终视频时实际采用的片段清单，包含房间、地图、UTC 边界、OBS 媒体时间、原因标记和无效片段诊断；
-- `assembly/assembly_report.json`：ffmpeg 拼接结果与最终输出路径。
+- `clip_intervals.json`：计算出的有效片段；
+- `selected_clips.json` / `selected_clips.log`：本次合成实际采用的片段；
+- `assembly/assembly_report.json`：ffmpeg 合成结果和最终输出路径。
 
-如果没有看到最终视频，优先检查最新 session 的 `assembly/assembly_report.json` 和 `clip_intervals.json`。
+`输出日志` 关闭时，成功生成最终视频后会自动清理大部分中间日志；开启后会保留，方便复盘。
 
----
+## 常见问题
 
-## 当前默认性能策略
+### 停止 OBS 录制后没有最终视频
 
-参数代码位置速查见 [docs/clip-parameter-locations.md](docs/clip-parameter-locations.md)。
+先检查：
 
-- 房间事件记录和内置 OBS helper 作为自动剪辑核心路径始终启用。
-- 旧的输入录制/回放、`F5/F6/F7` 热键、成功通关逐帧输入导出已经移除，不再占用 CPU/内存，也不会出现在 Mod Options。
-- OBS helper 默认轮询间隔为 `1000ms`；房间状态文件最多约每秒刷新一次；`room_enter -> load_level` 的进房 load 会从 load 后第 45 帧开始观察人物坐标、持续约 8 秒、每 10 帧采一次，并只把一个最佳 `player_position_sample` 写入当前 `room_event_<timestamp>.jsonl`；非进房 `load_level` 仍只在 load 后固定第 60 帧写入一次人物坐标样本。helper 生成剪辑区间时，凡是可匹配到 `player_position_sample` 的 `load_level` 边界，都会改用该采样事件的时间戳。事件 jsonl 只保留剪辑判断需要的字段，删除冗余来源/原因/草莓属性/采样元信息，降低单行长度和磁盘写入量。
-- 正常运行的 Info 级日志不再刷 Celeste 控制台；`输出日志 / LogOutputEnabled` 默认关闭时不写 helper stdout/stderr 日志文件，且成功合成后清理中间日志；警告、错误和手动命令输出仍保留。
+- OBS 是否真的开始并停止了录制；
+- OBS WebSocket 是否启用；
+- 面板中的 WebSocket 地址、端口和密码是否正确；
+- `<Celeste>/CelesteAutoCutReplays/obs_auto/sessions/<session-id>/` 是否生成；
+- `assembly/assembly_report.json` 里的 `finalOutputPath` 和错误信息；
+- OBS 录制目录下是否生成了地图名子文件夹。
 
----
+### 游戏里还是旧行为
 
-## 房间切换剪辑规则
+确认 `Mods` 目录里只有一个活动的 `CelesteAutoCut*.zip`。如果同时存在旧 zip，Everest 可能加载到旧版本。
 
-相邻房间片段会在实际 transition 边界处对齐：
+### ffmpeg 相关错误
 
-- 上一个房间不会再把 post-roll 延伸进下一个房间；
-- 下一个房间不会再把 pre-roll 回卷到上一个房间；
-- `clip_intervals.json` 会记录 `adjacent_room_overlap_trimmed`，表示相邻片段已去重对齐。
+helper 会优先使用你在面板里设置的 `ffmpeg.exe`。如果没有设置，它会尝试在工作目录中查找，必要时下载 ffmpeg essentials 包。
 
-当前保留区间算法：
+如果自动下载失败，可以手动下载 ffmpeg，并在面板中填写 `ffmpeg.exe` 的完整路径。
 
-- helper 先按事件时间得到有序事件流，然后候选区间生成只使用一个向前游标；每个事件最多被扫描常数次，候选生成复杂度为 O(n)；
-- 每个 session 内，若出现 `session_start`，先保留 `session_start -> first room_enter`，原因标记为 `session_intro`；
-- 随后从当前 `room_enter` 开始，先保留 `room_enter -> load_level`，原因标记为 `room_entry_load`，并记录当前关卡身份（`MapSid + Room`）；
-- 对同一关卡向后贪心寻找第一个普通无死亡成功终点，或符合后述条件的终点前 checkpoint 特例：
-  - `load_level -> transition`：保留为 `final_successful_attempt`，再保留 `transition -> first room_enter`，原因标记为 `transition_to_room_enter`；
-  - `load_level -> strawberry_collect`：保留为 `strawberry_collect_success`，再保留 `strawberry_collect -> first room_enter/exit`，原因标记为 `strawberry_collect_to_room_enter` 或 `strawberry_collect_to_exit`，这段尾巴中间允许出现 `death`；
-  - `load_level -> level_complete`：保留为 `final_successful_attempt`，然后继续保留后续 `level_complete -> exit`；
-  - `load_level -> exit`：不保留成功片段，直接跳到后续 session；
-- 普通情况下，`death` / `load_end` 会使当前 `load_level` 失效；只有后续同一 `MapSid + Room` 的新 `load_level` 才能重新成为成功片段起点；
-- 终点前 checkpoint 特例：同一房间内 `load_level(A) -> death -> load_level(B) -> transition` 也可算合法成功段，但成功段从 B 加载后固定第 60 帧的 `player_position_sample` 开始，避免保留死亡转场动画；A 与 B 的 `respawnPointX/Y` 必须存在且坐标不同，B->transition 中不能再出现额外 `death` / `load_end`；这个区间原因标记为 `checkpoint_death_successful_attempt`；
-- Respawn 的 `load_level` 不再由死亡后一帧的 `Level.Update` 猜测写入，而是在 Celeste 实际执行 `Level.LoadLevel(playerIntro=Respawn)` 并加载完玩家后写入；因此成功片段从 Respawn checkpoint 的实际加载完成点开始，不会把死亡动画当作片段开头；
-- Celeste 死亡后会按 `Session.RespawnPoint` / 当前房间 spawn 点重新 `LoadLevel(Respawn)`：如果该 checkpoint 位于房间末尾，随后无死亡进入下一个房间，则 `Respawn load_level -> transition` 算成功片段；如果回到房间开头或中途 checkpoint，也同样从该 Respawn load 开始，只有后续再次 `death` 才会丢弃这次尝试；
-- 每个带复活点的 `load_level` 事件都会在当前 `room_event_<timestamp>.jsonl` 的 `notes` 中记录当时的 `Session.RespawnPoint`：`respawnPointX`、`respawnPointY`，用于确认这次加载对应房间开头、中途还是末尾复活点；不再写入 `hasRespawnPoint` 这类可由坐标是否存在推导的冗余字段；
-- 模组会按 load 类型写入 `player_position_sample`：进房 `room_enter -> load_level` 从 load 后第 45 帧开始，使用约 8 秒窗口、每 10 帧一次，并只落盘当前 load 的最佳样本，优先在人物从候选帧起连续 10 帧速度都为 0 的所有候选中选择时间更靠后的帧，其次选择位置最接近 spawn point 的非静止帧；非进房 `load_level` 不跑窗口，而是在 load 后固定第 60 帧写入一次人物坐标。采样会带上 `loadEventId`、人物坐标、对应 spawn point，以及进房采样是否连续 10 帧静止的 `stationary`；单条采样不再写入 `source`、采样间隔、采样窗口等可由版本行为确定的冗余字段；这些采样用于 helper 计算所有 `load_level` 起点/终点边界的实际时间戳，以及单独进房片段结束点或 Respawn/checkpoint 成功段起点，不会触发状态文件频繁刷新；
-- 若成功片段从 `load_level(playerIntro=Respawn)` 开始，该片段起点不会应用 pre-roll，会直接从人物加载完毕的时间点开始，避免死亡前画面残留；
-- 不符合上述模式的事件不会生成片段，诊断会写入 `clip_intervals.json` 的 `warnings`，不会刷 Celeste 控制台；
-- 事件时间上首尾相连且属于同一地图的候选区间会合并成一个 `merged_linear_interval`，不会删除 1ms 这类过短候选；这样既保留转场时间，又避免 ffmpeg 生成只有音频没有视频帧的超短 segment；
-- 如果最后一个保留片段的 `post-roll` 超出 OBS 实际录制文件尾，生成区间时会夹到录制文件末尾；只有事件本身已经超出录制文件时才继续标记为 `source_file_mapping_gap`。
-- 子进程资源释放：模组关闭时会终止 helper 进程树，等待 stdout/stderr 输出管道泵结束后再释放 `Process`；helper 调用 ffmpeg 时也会在等待退出后释放进程对象。
-- 对单独的 `room_enter -> load_level` 进房片段，helper 的结束点优先级是：从候选帧起连续 10 帧速度都为 0 的候选中时间更靠后的 `player_position_sample` > 距离 spawn point 最近的非静止 `player_position_sample` > 进房 load 后约 5 秒内同房间 `death` 且随后同房间重新 `load_level`。因此房间后续死亡、成功段来自另一次 `load_level` 时，只要初始 load 有对应 `player_position_sample`，仍会保留 `load_level -> player_position_sample`，原因标记为 `room_entry_load_player_position_end`；只有初始 load 缺少采样时才回退为 `room_enter -> load_level -> death -> load_level`，原因标记为 `room_entry_load_death_reload`，且这个重新 load 若有对应采样，片段终点也会改用该采样时间并标记 `load_level_player_position_end`；缺少 spawn point 或采样且没有 death-reload 时才使用固定 `PostRollMs` delay，原因标记为 `room_entry_load_delay`。如果 `room_enter -> load_level` 后续马上由同一个 `load_level` 形成 `load_level -> transition/strawberry_collect/level_complete` 成功段，则两段按同一 load 边界直接合并，不再使用进房采样截断。
-- 折返抑制已取消：`A -> B -> A -> B`、支路返回、同名房间再进入都按同一套线性事件规则处理。
+### 控制台没有详细日志
 
-最终拼接规则：
+这是正常的。默认只保留警告和错误，成功合成后会清理中间日志。需要详细排查时，在 Mod Options 中开启 `Output Logs` / `输出日志` 后再复现一次。
 
-- 精确模式会先把每个片段重编码成临时 segment；
-- 最终 concat 阶段也会重新编码一次，避免直接 stream copy 时继承异常视频时间戳，导致成片时长变长或播放到中途卡住。
+### 会不会影响存档
 
----
+不会。CelesteAutoCut 不会读写或删除 Celeste 存档文件。
 
-## 关于存档
+它只会写入：
 
-CelesteAutoCut 不会读写或删除 Celeste 存档文件。代码只会写入：
-
-- `<Celeste>/CelesteAutoCutReplays/` 下的事件、session、临时拼接文件；
-- OBS 录制目录下地图名子文件夹中的最终视频；
+- `<Celeste>/CelesteAutoCutReplays/` 下的事件、session 和临时合成文件；
+- OBS 录制目录或你指定输出目录下的最终视频；
 - `<Celeste>/CelesteAutoCutTools/` 下的 helper 文件。
 
-如果某张 mod 地图的存档看起来消失，建议先确认 Everest 是否加载了同一套 mod、同一存档槽，以及 `Mods` 目录里是否只有一个活动的 `CelesteAutoCut*.zip`。
+## 开发和打包
 
----
+用户只需要下载 Release zip。下面命令仅供开发者使用。
 
-## 常用故障排查
-
-### 1. 停止 OBS 录制后没看到最终视频
-
-检查：
-
-- OBS 是否真的开始录制；
-- OBS websocket 是否启用并连接；
-- `<Celeste>/CelesteAutoCutReplays/obs_auto/sessions/<session-id>/` 是否生成；
-- `assembly/assembly_report.json` 中的 `finalOutputPath`；
-- OBS 录制目录下是否生成了对应地图名子文件夹。
-
-### 2. 游戏里还是旧行为
-
-在真实环境测试或安装前，确保：
-
-```text
-D:\Steam\steamapps\common\Celeste\Mods
-```
-
-中只有一个活动的 `CelesteAutoCut*.zip`。删除旧的 `CelesteAutoCut-*.zip` 副本，避免 Everest 加载旧包。
-
-内置 OBS helper 会释放到 `<Celeste>/CelesteAutoCutTools/ObsClipPanel/`。helper 的版本标记包含内嵌 payload 的 SHA-256 指纹；只要 DLL 里的 helper payload 变化，下一次游戏启动会自动重新释放并覆盖旧 helper，避免旧 `ObsClipPanel.exe` 继续使用过期的 room event 读取逻辑。
-
-### 3. 控制台出现大量失败尝试日志
-
-当前版本已移除 `Discarded failed checkpoint attempt` 这类正常失败尝试日志；旧的成功通关逐帧输入记录功能也已删除。房间事件重置、helper 正常退出等非错误路径不再向控制台输出常规日志。若需要保留 `room_event_*.jsonl`、`obs_events.jsonl`、`clip_intervals.json`、`selected_clips.*`、assembly 报告/ffconcat 或 helper stdout/stderr 日志用于排查，请在 Mod Options 里开启 `输出日志 / LogOutputEnabled`。
-
----
-
-## 开发 / 打包
-
-打包发布命令速查见 [docs/package-release-commands.md](docs/package-release-commands.md)。
-
-发布命令：
-
-```powershell
-..\.dotnet\dotnet.exe publish .\CelesteAutoCut\CelesteAutoCut.csproj -c Release
-```
-
-打包产物：
-
-- `artifacts/release/CelesteAutoCut.zip`
-- `CelesteAutoCut.zip`
-- `artifacts/publish/`
-
-zip 中包含：
-
-- `everest.yaml`
-- `README.md`
-- `bin/CelesteAutoCut.dll`
-- `bin/CelesteAutoCut.deps.json`
-
-helper 以内嵌 payload 方式随 DLL 分发，运行时自动释放。
-
----
-
-## 验证
-
-本次变更使用的验证：
+运行自测：
 
 ```powershell
 ..\.dotnet\dotnet.exe run --project .\ObsClipSidecar\ObsClipSidecar.csproj -- self-test
+```
+
+构建 OBS helper：
+
+```powershell
 ..\.dotnet\dotnet.exe build .\ObsClipPanel\ObsClipPanel.csproj -c Release
+```
+
+发布并生成 zip：
+
+```powershell
 ..\.dotnet\dotnet.exe publish .\CelesteAutoCut\CelesteAutoCut.csproj -c Release
 ```
 
-当前自测覆盖：
+产物：
 
-- 首房间初始 `Transition load_level` 不截断房间开头；
-- 死亡房间保留“进入房间 -> 初始 `load_level`”，成功片段从 `Respawn load_level` 精确开始而不是从 `death` 或死亡前 pre-roll 开始；
-- 单独的 `room_enter -> load_level` 进房片段优先结束在从候选帧起连续 10 帧速度都为 0 的候选中时间更靠后的采样；否则在 load 后第 45 帧开始的约 8 秒窗口内每 10 帧采样，结束在最接近 spawn point 的非静止采样；若初始 load 缺少采样且 5 秒内死亡并重新 load，则保留到重新 load 对应的采样时间；缺少采样时才回退到固定 `PostRollMs` delay；如果后续成功段使用同一个 load，则直接合并为一个连续片段，不用进房采样截断；
-- 终点前 checkpoint 特例：`load -> death -> load -> transition` 只有在两次 `load_level` 的 respawnPoint 坐标不同且中间没有额外死亡时，才会从第一次 load 保留到 transition；坐标相同则仍退回普通 Respawn load 成功段；
-- 分支后再次进入同名房间时，每次访问独立生成片段；
-- 折返抑制已取消，来回折返会按普通 `room_enter/load_level/transition` 事件生成片段；
-- 支路返回 Hub 后继续前进的路线会被保留；
-- `load_level -> level_complete` 和 `level_complete -> exit` 会作为最终通关片段保留；
-- 一次录制中多个地图 SID 会拆成多个独立输出；
-- 多地图输出路径发生冲突时会自动加地图子文件夹避免覆盖；
-- 草莓房要保留“本次 `load_level` -> 拿草莓”，并确认 `strawberry_collect -> first room_enter/exit` 中间允许死亡且不会生成重复成功片段；
-- 精确拼接模式的最终 concat 会重新编码，避免输出视频时间戳异常膨胀。
+- `CelesteAutoCut.zip`
+- `artifacts/release/CelesteAutoCut.zip`
+- `artifacts/publish/`
 
-真实环境脚本：
-
-```powershell
-.\Scripts\real-zip-only-test.ps1
-```
-
-脚本会先进入 1A 建立房间事件 session，再启动 OBS 录制并播放 1A TAS；如果 1A TAS 复用了进入录制前已经存在的同一房间 session，验证会复用该 session，而不是误判为“录制后没有新的 room event”。验证同时检查最终视频位于地图名子文件夹，且文件名仍为录制开始本地时间；可用 `ffprobe` 对比最终视频时长和 `clip_intervals.json` 的有效片段总时长，确认成片没有因时间戳异常变长或卡住。
+更多打包命令见 [docs/package-release-commands.md](docs/package-release-commands.md)。
