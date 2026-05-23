@@ -14,8 +14,9 @@ internal sealed class RoomClipRecorder {
     private const long StatusWriteIntervalFrames = 60;
     private const long PlayerPositionSampleStartDelayFrames = 45;
     private const long PlayerPositionSampleIntervalFrames = 10;
-    private const long PlayerPositionSampleWindowFrames = 300;
-    private const long FixedLoadPositionSampleDelayFrames = 60;
+    private const long PlayerPositionSampleWindowFrames = 480;
+    private const long FixedLoadPositionSampleDelayFrames = 50;
+    private const int ConsecutiveStationarySampleFrames = 5;
     private const string EventLogPrefix = "room_event_";
     private const string EventLogExtension = ".jsonl";
     private const string StatusFileName = "room_clip_session.json";
@@ -372,7 +373,7 @@ internal sealed class RoomClipRecorder {
         var distanceSquared = DistanceSquared(player.Position, spawnPoint);
         var sampleUtc = DateTime.UtcNow.ToString("O");
         if (isStationary) {
-            pendingPlayerPositionSample = new PendingPlayerPositionSample(room, player.Position, spawnPoint, distanceSquared, gameFrame, sampleUtc);
+            pendingPlayerPositionSample = new PendingPlayerPositionSample(room, player.Position, spawnPoint, distanceSquared, gameFrame, sampleUtc, StationaryFrameCount: 1);
             return;
         }
 
@@ -385,8 +386,20 @@ internal sealed class RoomClipRecorder {
         }
 
         var pending = pendingPlayerPositionSample.Value;
+        if (!nextFrameIsStationary) {
+            pendingPlayerPositionSample = null;
+            RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, isStationary: false, pending.DistanceSquared, pending.GameFrame, pending.Utc);
+            return;
+        }
+
+        int stationaryFrameCount = pending.StationaryFrameCount + 1;
+        if (stationaryFrameCount < ConsecutiveStationarySampleFrames) {
+            pendingPlayerPositionSample = pending with { StationaryFrameCount = stationaryFrameCount };
+            return;
+        }
+
         pendingPlayerPositionSample = null;
-        RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, nextFrameIsStationary, pending.DistanceSquared, pending.GameFrame, pending.Utc);
+        RecordPlayerPositionSample(pending.Room, pending.PlayerPosition, pending.SpawnPoint, isStationary: true, pending.DistanceSquared, pending.GameFrame, pending.Utc);
     }
 
     private void RecordPlayerPositionSample(string room, Vector2 playerPosition, Vector2 spawnPoint, bool isStationary, double distanceSquared, long sampleFrame, string sampleUtc) {
@@ -620,6 +633,7 @@ internal sealed class RoomClipRecorder {
         Vector2 SpawnPoint,
         double DistanceSquared,
         long GameFrame,
-        string Utc);
+        string Utc,
+        int StationaryFrameCount);
 
 }
