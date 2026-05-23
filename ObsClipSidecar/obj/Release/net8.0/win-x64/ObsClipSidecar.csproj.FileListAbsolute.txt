@@ -195,3 +195,4 @@ C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Relea
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\win-x64\ObsClipSidecar.pdb
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\win-x64\ObsClipSidecar.genruntimeconfig.cache
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\win-x64\ref\ObsClipSidecar.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipSidecar\obj\Release\net8.0\win-x64\ObsClipSidecar.sourcelink.json

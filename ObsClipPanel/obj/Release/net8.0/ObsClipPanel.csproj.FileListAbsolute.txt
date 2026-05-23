@@ -32,3 +32,4 @@ C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipPanel\obj\Release
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipPanel\obj\Release\net8.0\ObsClipPanel.pdb
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipPanel\obj\Release\net8.0\ObsClipPanel.genruntimeconfig.cache
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipPanel\obj\Release\net8.0\ref\ObsClipPanel.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\ObsClipPanel\obj\Release\net8.0\ObsClipPanel.sourcelink.json

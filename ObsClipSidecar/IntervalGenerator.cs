@@ -291,6 +291,7 @@ public sealed class IntervalGenerator
                 }
 
                 var level = LevelIdentity.From(firstLoad);
+                var roomEntryIntro = new RoomIntro(roomEnter, firstLoad);
                 RoomEvent? activeLoad = firstLoad;
                 RoomEvent? checkpointDeathLoad = null;
                 RoomEvent? checkpointDeathSuccessStart = null;
@@ -321,6 +322,7 @@ public sealed class IntervalGenerator
                     if (IsSessionStart(current))
                     {
                         FlushPendingCheckpointDeathWarning();
+                        EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
                         sessionDone = true;
                         break;
                     }
@@ -328,6 +330,7 @@ public sealed class IntervalGenerator
                     if (IsSessionEnd(current))
                     {
                         FlushPendingCheckpointDeathWarning();
+                        EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
                         i++;
                         sessionDone = true;
                         break;
@@ -336,6 +339,7 @@ public sealed class IntervalGenerator
                     if (IsRoomEntry(current))
                     {
                         FlushPendingCheckpointDeathWarning();
+                        EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
                         warnings.Add(DiscardWarning("linear_discard_missing_success_before_room_enter", current));
                         break;
                     }
@@ -343,6 +347,7 @@ public sealed class IntervalGenerator
                     if (IsExitLike(current))
                     {
                         FlushPendingCheckpointDeathWarning();
+                        EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
                         if (activeLoad is not null)
                         {
                             warnings.Add(DiscardWarning("linear_discard_load_to_exit", current));
@@ -782,6 +787,27 @@ public sealed class IntervalGenerator
     private static void AddCandidate(List<ClipCandidate> result, ref int index, RoomEvent start, RoomEvent end, string room, string? mapSid, string reason, bool isCheckpointIntro)
     {
         result.Add(new ClipCandidate(index++, start, end, room, mapSid, reason, isCheckpointIntro));
+    }
+
+    private static void EnsureRoomEntryIntroCandidate(List<ClipCandidate> result, ref int index, RoomIntro intro)
+    {
+        if (result.Any(candidate =>
+                ReferenceEquals(candidate.Start, intro.Entry) &&
+                ReferenceEquals(candidate.End, intro.InitialCheckpoint) &&
+                string.Equals(candidate.BaseValidReason, "room_entry_load", StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        AddCandidate(
+            result,
+            ref index,
+            intro.Entry,
+            intro.InitialCheckpoint,
+            intro.Entry.Room ?? intro.InitialCheckpoint.Room ?? "room",
+            intro.Entry.MapSid ?? intro.InitialCheckpoint.MapSid,
+            "room_entry_load",
+            isCheckpointIntro: true);
     }
 
     private static bool IsSessionStart(RoomEvent e)

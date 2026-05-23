@@ -58,7 +58,7 @@
 | `MaxCutErrorMs` | 100 ms | `PanelSettings.MaxCutErrorMs` | ffmpeg 切点误差容忍。 |
 | `SplitOnPause` | true | `PanelSettings.SplitOnPause` | pause 区间是否自动切开。 |
 | `RequireExistingFiles` | true | `PanelSettings.RequireExistingFiles` | 是否要求源录制文件存在。 |
-| `LogOutputEnabled` | false | `CelesteAutoCut/CelesteReplaySettings.cs` / `ObsClipPanel/PanelModels.cs` | 默认关闭；关闭时成功生成视频后清理 `room_event_*.jsonl`、OBS/区间/assembly/helper 日志。 |
+| `LogOutputEnabled` | false | `CelesteAutoCut/CelesteReplaySettings.cs` / `ObsClipPanel/PanelModels.cs` | 默认关闭；关闭时成功生成视频后清理全部匹配的 `room_event_*.jsonl`、helper stdout/stderr，以及当前 `obs_auto/sessions/<session-id>/` 工作目录。 |
 
 设置流向：
 

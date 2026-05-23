@@ -1,4 +1,4 @@
-# CelesteAutoCut
+﻿# CelesteAutoCut
 
 CelesteAutoCut 是一个用于 **Celeste / Everest** 的自动剪辑模组。它会结合 Celeste 的房间事件和 OBS 的录制时间轴，把一整段录制自动剪成只保留有效游玩片段的成片。
 
@@ -23,7 +23,7 @@ OBS 28 及以上通常自带 WebSocket。请在 OBS 中打开：
 Tools -> WebSocket Server Settings
 ```
 
-勾选 `Enable WebSocket server`，默认端口为 `4455`。如果设置了密码，稍后在 CelesteAutoCut 面板中填同一个密码。
+勾选 `Enable WebSocket server`，默认端口为 `4455`。
 
 ## 安装
 
@@ -56,7 +56,7 @@ helper 会随游戏启动，游戏退出后也会自动退出。
 5. 停止 OBS 录制。
 6. 等待 helper 自动生成最终视频。
 
-默认情况下，停止 OBS 录制后会自动合成最终视频；不需要手动导出回放，也不需要按额外热键。
+默认情况下，停止 OBS 录制后会自动合成最终视频；不需要手动导出回放，也不需要按额外热键。多次录制会生成多个视频，目前暂无自动将一个地图多次录制的视频自动合并为一个视频的功能。
 
 ## OBS 面板
 
@@ -124,7 +124,7 @@ E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 | 选项 | 说明 |
 | --- | --- |
 | `Output Directory` / `输出目录` | 最终剪辑视频的输出根目录。留空时使用 OBS 录制目录。每张地图仍会输出到对应地图名子文件夹。 |
-| `Output Logs` / `输出日志` | 默认关闭。开启后会保留 room event、OBS event、clip intervals、片段选择、assembly 报告、ffconcat 和 helper stdout/stderr 日志，方便排查问题。 |
+| `Output Logs` / `输出日志` | 默认关闭。开启后会保留 room event、OBS event、clip intervals、片段选择、assembly 报告、ffconcat 和 helper stdout/stderr 日志，方便排查问题。关闭时成功生成最终视频后，会清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr 以及本次 `obs_auto/sessions/<session-id>/` 工作目录。 |
 
 ## 中间文件和日志
 
@@ -154,7 +154,9 @@ OBS helper 的工作目录是：
 - `selected_clips.json` / `selected_clips.log`：本次合成实际采用的片段；
 - `assembly/assembly_report.json`：ffmpeg 合成结果和最终输出路径。
 
-`输出日志` 关闭时，成功生成最终视频后会自动清理大部分中间日志；开启后会保留，方便复盘。
+`输出日志` 关闭时，成功生成最终视频后会自动清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr，以及本次录制对应的 `obs_auto/sessions/<session-id>/` 临时工作目录；开启后会保留。
+
+剪辑算法会始终保留 `room_enter -> load_level` 的进房 intro 片段；即使后续没有找到可配对的 `load_level -> transition / strawberry_collect / level_complete` 成功段、而是直接 `exit`，这段 intro 也不会被丢掉。
 
 ## 常见问题
 
@@ -169,29 +171,9 @@ OBS helper 的工作目录是：
 - `assembly/assembly_report.json` 里的 `finalOutputPath` 和错误信息；
 - OBS 录制目录下是否生成了地图名子文件夹。
 
-### 游戏里还是旧行为
-
-确认 `Mods` 目录里只有一个活动的 `CelesteAutoCut*.zip`。如果同时存在旧 zip，Everest 可能加载到旧版本。
-
 ### ffmpeg 相关错误
 
 helper 会优先使用你在面板里设置的 `ffmpeg.exe`。如果没有设置，它会尝试在工作目录中查找，必要时下载 ffmpeg essentials 包。
-
-如果自动下载失败，可以手动下载 ffmpeg，并在面板中填写 `ffmpeg.exe` 的完整路径。
-
-### 控制台没有详细日志
-
-这是正常的。默认只保留警告和错误，成功合成后会清理中间日志。需要详细排查时，在 Mod Options 中开启 `Output Logs` / `输出日志` 后再复现一次。
-
-### 会不会影响存档
-
-不会。CelesteAutoCut 不会读写或删除 Celeste 存档文件。
-
-它只会写入：
-
-- `<Celeste>/CelesteAutoCutReplays/` 下的事件、session 和临时合成文件；
-- OBS 录制目录或你指定输出目录下的最终视频；
-- `<Celeste>/CelesteAutoCutTools/` 下的 helper 文件。
 
 ## 开发和打包
 
@@ -221,4 +203,7 @@ helper 会优先使用你在面板里设置的 `ffmpeg.exe`。如果没有设置
 - `artifacts/release/CelesteAutoCut.zip`
 - `artifacts/publish/`
 
-更多打包命令见 [docs/package-release-commands.md](docs/package-release-commands.md)。
+## 下一步计划
+
+[] 支持将同一个地图录制的多段视频合成一个视频
+[] 支持自动识别炼金等特殊场景

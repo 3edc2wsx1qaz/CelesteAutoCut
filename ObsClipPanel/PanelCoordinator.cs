@@ -834,13 +834,19 @@ public sealed class PanelCoordinator : BackgroundService
 
         try
         {
-            TryDeleteFile(roomEventsPath);
+            foreach (var path in EnumerateRoomEventCleanupTargets(settings.RoomEventsPath, roomEventsPath))
+            {
+                TryDeleteFile(path);
+            }
+
+            TryDeleteDirectory(paths.AssemblyDirectory, recursive: true);
             TryDeleteFile(paths.ObsEventsPath);
             TryDeleteFile(paths.SessionManifestPath);
             TryDeleteFile(paths.ClipIntervalsPath);
             TryDeleteFile(Path.Combine(paths.SessionDirectory, "selected_clips.json"));
             TryDeleteFile(Path.Combine(paths.SessionDirectory, "selected_clips.log"));
-            CleanupAssemblyLogs(paths.AssemblyDirectory);
+            TryDeleteDirectory(paths.SessionDirectory, recursive: true);
+            TryDeleteDirectoryIfEmpty(Path.GetDirectoryName(paths.SessionDirectory));
             TryDeleteFile(Path.Combine(settings.WorkingDirectory, "obs-auto-stdout.log"));
             TryDeleteFile(Path.Combine(settings.WorkingDirectory, "obs-auto-stderr.log"));
         }
@@ -863,6 +869,68 @@ public sealed class PanelCoordinator : BackgroundService
             TryDeleteFile(Path.Combine(directory, "map_outputs.json"));
             TryDeleteFile(Path.Combine(directory, "clip_plan.ffconcat"));
             TryDeleteFile(Path.Combine(directory, "precise_segments.ffconcat"));
+        }
+    }
+
+    private static IEnumerable<string> EnumerateRoomEventCleanupTargets(string configuredPath, string? resolvedRoomEventsPath)
+    {
+        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(resolvedRoomEventsPath))
+        {
+            var fullResolved = Path.GetFullPath(resolvedRoomEventsPath);
+            if (emitted.Add(fullResolved))
+            {
+                yield return fullResolved;
+            }
+        }
+
+        foreach (var candidate in EnumerateRoomEventCandidates(configuredPath))
+        {
+            var fullCandidate = Path.GetFullPath(candidate);
+            if (emitted.Add(fullCandidate))
+            {
+                yield return fullCandidate;
+            }
+        }
+    }
+
+    private static void TryDeleteDirectory(string? path, bool recursive)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive);
+            }
+        }
+        catch
+        {
+            // Log cleanup is best-effort and must not turn a successful video build into a failure.
+        }
+    }
+
+    private static void TryDeleteDirectoryIfEmpty(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(path).Any())
+            {
+                Directory.Delete(path, recursive: false);
+            }
+        }
+        catch
+        {
+            // Log cleanup is best-effort and must not turn a successful video build into a failure.
         }
     }
 

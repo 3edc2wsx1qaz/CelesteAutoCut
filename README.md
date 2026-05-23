@@ -124,7 +124,7 @@ E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 | 选项 | 说明 |
 | --- | --- |
 | `Output Directory` / `输出目录` | 最终剪辑视频的输出根目录。留空时使用 OBS 录制目录。每张地图仍会输出到对应地图名子文件夹。 |
-| `Output Logs` / `输出日志` | 默认关闭。开启后会保留 room event、OBS event、clip intervals、片段选择、assembly 报告、ffconcat 和 helper stdout/stderr 日志，方便排查问题。 |
+| `Output Logs` / `输出日志` | 默认关闭。开启后会保留 room event、OBS event、clip intervals、片段选择、assembly 报告、ffconcat 和 helper stdout/stderr 日志，方便排查问题。关闭时成功生成最终视频后，会清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr 以及本次 `obs_auto/sessions/<session-id>/` 工作目录。 |
 
 ## 中间文件和日志
 
@@ -154,7 +154,9 @@ OBS helper 的工作目录是：
 - `selected_clips.json` / `selected_clips.log`：本次合成实际采用的片段；
 - `assembly/assembly_report.json`：ffmpeg 合成结果和最终输出路径。
 
-`输出日志` 关闭时，成功生成最终视频后会自动清理大部分中间日志；开启后会保留。
+`输出日志` 关闭时，成功生成最终视频后会自动清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr，以及本次录制对应的 `obs_auto/sessions/<session-id>/` 临时工作目录；开启后会保留。
+
+剪辑算法会始终保留 `room_enter -> load_level` 的进房 intro 片段；即使后续没有找到可配对的 `load_level -> transition / strawberry_collect / level_complete` 成功段、而是直接 `exit`，这段 intro 也不会被丢掉。
 
 ## 常见问题
 

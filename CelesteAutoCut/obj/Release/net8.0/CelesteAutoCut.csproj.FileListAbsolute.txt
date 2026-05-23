@@ -10,3 +10,4 @@ C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Relea
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\refint\CelesteAutoCut.dll
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.pdb
 C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\ref\CelesteAutoCut.dll
+C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\Release\net8.0\CelesteAutoCut.sourcelink.json

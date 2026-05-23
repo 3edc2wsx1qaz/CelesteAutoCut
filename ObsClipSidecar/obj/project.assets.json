@@ -169,5 +169,13 @@
         "#import": []
       }
     }
-  }
+  },
+  "logs": [
+    {
+      "code": "NU1900",
+      "level": "Warning",
+      "warningLevel": 1,
+      "message": "获取包漏洞数据时出错: 由于在 60000 毫秒内未接收到数据，“https://api.nuget.org/v3/vulnerabilities/vulnerability.base.json”的下载超时。"
+    }
+  ]
 }

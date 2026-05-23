@@ -30,6 +30,7 @@ public static class SelfTests
             ("room entry death reload uses reload sample boundary", RoomEntryDeathReloadUsesReloadSampleBoundary),
             ("room entry death reload ignores deaths outside window", RoomEntryDeathReloadIgnoresDeathsOutsideWindow),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
+            ("room entry intro survives respawn then exit without success", RoomEntryIntroSurvivesRespawnThenExitWithoutSuccess),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
             ("revisited branching room gets separate death entry clips", RevisitedBranchingRoomGetsSeparateDeathEntryClips),
@@ -622,6 +623,32 @@ public static class SelfTests
         Assert(entryLoad.StartOutputDurationMs == 2_000, "room entry load delay must not add preroll");
         Assert(entryLoad.EndOutputDurationMs == 2_700, "standalone room_enter -> load_level should keep a post-load delay");
         Assert(entryLoad.Reasons.Contains("room_entry_load_delay"), "standalone room entry load delay should be annotated");
+    }
+
+    private static void RoomEntryIntroSurvivesRespawnThenExitWithoutSuccess()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var introLoad = start.AddMilliseconds(300);
+        var respawnLoad = start.AddSeconds(1);
+        var exit = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = introLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "death", Utc = start.AddMilliseconds(700), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Respawn" } },
+            new() { EventType = "exit", Utc = exit, Room = "a", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        Assert(HasClipCovering(doc, start, introLoad), "exit after an unmatched respawn should still keep the original room entry intro");
+        Assert(!doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == exit), "unmatched respawn should not produce a load_level -> exit success clip");
     }
 
     private static void FirstRoomTransitionLoadLevelDoesNotCutOffIntro()
