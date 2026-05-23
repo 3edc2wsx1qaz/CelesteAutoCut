@@ -1,4 +1,0 @@
-C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\obs-helper-publish\ObsClipPanel.pdb
-C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\obs-helper-publish\ObsClipSidecar.runtimeconfig.json
-C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\obs-helper-publish\ObsClipSidecar.pdb
-C:\Users\18254\Desktop\celeste_replay_mod\CelesteReplay\CelesteAutoCut\obj\obs-helper-publish\ObsClipPanel.exe

@@ -197,6 +197,8 @@ helper 会优先使用你在面板里设置的 `ffmpeg.exe`。如果没有设置
 
 - `CelesteAutoCut.zip`
 - `artifacts/release/CelesteAutoCut.zip`
+
+生成的 zip 和 `bin/` / `obj/` / `artifacts/` 构建产物不纳入 Git 跟踪；发布时重新打包并复制到 Celeste `Mods` 目录即可，不需要因为 zip 二进制变化提交 zip 文件。
 - `artifacts/publish/`
 
 ## 下一步计划

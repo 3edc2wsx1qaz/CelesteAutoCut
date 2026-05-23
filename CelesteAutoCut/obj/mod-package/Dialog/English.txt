@@ -1,5 +1,0 @@
-﻿MODOPTIONS_CELESTEAUTOCUT_TITLE=Celeste Auto Cut
-MODOPTIONS_CELESTEAUTOCUT_OutputDirectory=Output Directory
-MODOPTIONS_CELESTEAUTOCUT_OutputDirectory_DESCRIPTION=Root directory for final clipped videos. Leave empty to use the OBS recording folder. Map-name subfolders are still created.
-MODOPTIONS_CELESTEAUTOCUT_LogOutputEnabled=Output Logs
-MODOPTIONS_CELESTEAUTOCUT_LogOutputEnabled_DESCRIPTION=Keep room_event, OBS event, interval, clip-selection, assembly report/ffconcat, and helper stdout/stderr logs after a successful video build. Disabled by default.
