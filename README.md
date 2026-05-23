@@ -1,6 +1,4 @@
-﻿# CelesteAutoCut
-
-CelesteAutoCut 是一个用于 **Celeste / Everest** 的自动剪辑模组。它会结合 Celeste 的房间事件和 OBS 的录制时间轴，把一整段录制自动剪成只保留有效游玩片段的成片。
+﻿CelesteAutoCut 是一个用于 **Celeste / Everest** 的自动剪辑模组。它会结合 Celeste 的房间事件和 OBS 的录制时间轴，把一整段录制自动剪成只保留有效游玩片段的成片。
 
 适合这些场景：
 
@@ -156,7 +154,7 @@ OBS helper 的工作目录是：
 
 `输出日志` 关闭时，成功生成最终视频后会自动清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr，以及本次录制对应的 `obs_auto/sessions/<session-id>/` 临时工作目录；开启后会保留。清理后的活动日志不会被后续延迟到达的 `player_position_sample` 重新创建成 sample-only 残片，保留下来的 `room_event_*.jsonl` 应始终是完整事件日志。
 
-剪辑算法会始终保留最后匹配到的 `room_enter -> load_level` 进房 intro 片段；即使后续没有找到可配对的 `load_level -> transition / strawberry_collect / level_complete` 成功段，也不要求必须收到 `exit`。因此 OBS 录制在房间内被直接中断、没有 Celeste `exit` 信号时，末尾这段 intro 仍会保留。起始边界优先选择 `session_start`；没有 `session_start` 时选择第一个 `room_enter`；如果缺少 `room_enter`，会用第一个 load / `player_position_sample` 合成一个入口片段继续匹配。单独的末尾 `room_enter -> load_level` 片段会直接使用对应 `player_position_sample` 的时间戳作为终点；没有 sample 时使用 load 后延迟并按录制文件末尾截断。
+剪辑算法会始终保留最后匹配到的 `room_enter -> load_level` 进房 intro 片段；即使后续没有找到可配对的 `load_level -> transition / strawberry_collect / level_complete` 成功段，也不要求必须收到 `exit`。因此 OBS 录制在房间内被直接中断、没有 Celeste `exit` 信号时，末尾这段 intro 仍会保留。停止 OBS 录制后，helper 会先请求游戏端把当前已经观测到的最优 `player_position_sample` 立即写入日志，再开始自动合成，避免末尾 sample 晚于合成。起始边界优先选择 `session_start`；没有 `session_start` 时选择第一个 `room_enter`；如果缺少 `room_enter`，会用第一个 load / `player_position_sample` 合成一个入口片段继续匹配。单独的末尾 `room_enter -> load_level` 片段会直接使用对应 `player_position_sample` 的时间戳作为终点；没有 sample 时使用 load 后延迟并按录制文件末尾截断。
 
 ## 常见问题
 
@@ -205,5 +203,5 @@ helper 会优先使用你在面板里设置的 `ffmpeg.exe`。如果没有设置
 
 ## 下一步计划
 
-[] 支持将同一个地图录制的多段视频合成一个视频
-[] 支持自动识别炼金等特殊场景
+- [] 支持将同一个地图录制的多段视频合成一个视频
+- [] 支持自动识别炼金等特殊场景

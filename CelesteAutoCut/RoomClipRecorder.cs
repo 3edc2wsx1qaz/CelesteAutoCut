@@ -238,6 +238,10 @@ internal sealed class RoomClipRecorder {
         UpdatedAtUtc = DateTime.UtcNow.ToString("O")
     };
 
+    public void FlushBestPlayerPositionSample() {
+        FlushPlayerPositionSample();
+    }
+
     private void Stop(string reason, bool discard) {
         if (!active) {
             return;

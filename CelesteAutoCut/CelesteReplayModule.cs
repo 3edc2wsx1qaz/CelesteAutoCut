@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Celeste;
 using Celeste.Mod;
 using Monocle;
@@ -16,6 +17,8 @@ public sealed class CelesteAutoCutModule : EverestModule {
     private bool observedLevelSceneLastFrame;
     private int obsAutoAssemblerReadyFrames;
     private const int ObsAutoAssemblerStartupDelayFrames = 30;
+    private const string RoomClipFlushRequestFileName = "room_clip_flush_request.txt";
+    private const string RoomClipFlushAckFileName = "room_clip_flush_ack.txt";
 
     public override Type SettingsType => typeof(CelesteAutoCutSettings);
 
@@ -86,6 +89,7 @@ public sealed class CelesteAutoCutModule : EverestModule {
         roomClipRecorder.ObserveLevel(self, chapterComplete);
         observedLevelSceneLastFrame = true;
         roomClipRecorder.TickFrame(self);
+        FlushRoomClipSampleIfRequested();
     }
 
     private void ObserveSceneExit() {
@@ -110,6 +114,24 @@ public sealed class CelesteAutoCutModule : EverestModule {
     [Command("replay_room_clip_path", "Print CelesteAutoCut room clip event log path.")]
     private static void CommandRoomClipPath() {
         Engine.Commands?.Log($"[CelesteAutoCut] roomClip eventLog={Instance.roomClipRecorder.EventLogPath}");
+    }
+
+    private void FlushRoomClipSampleIfRequested() {
+        var requestPath = Path.Combine(controller.ReplayDirectory, RoomClipFlushRequestFileName);
+        if (!File.Exists(requestPath)) {
+            return;
+        }
+
+        try {
+            var requestId = File.ReadAllText(requestPath).Trim();
+            roomClipRecorder.FlushBestPlayerPositionSample();
+            File.WriteAllText(Path.Combine(controller.ReplayDirectory, RoomClipFlushAckFileName), requestId);
+            File.Delete(requestPath);
+        } catch {
+            // Best-effort bridge from OBS helper to the in-game recorder. If the
+            // request file is being rewritten, the helper will retry/timeout and
+            // the next frame can observe the request again.
+        }
     }
 }
 

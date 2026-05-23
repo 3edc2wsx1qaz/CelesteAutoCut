@@ -8,6 +8,9 @@ namespace ObsClipPanel;
 public sealed class PanelCoordinator : BackgroundService
 {
     private const string CaptureSource = "websocket-auto";
+    private const string RoomClipFlushRequestFileName = "room_clip_flush_request.txt";
+    private const string RoomClipFlushAckFileName = "room_clip_flush_ack.txt";
+    private static readonly TimeSpan RoomClipFlushTimeout = TimeSpan.FromMilliseconds(1500);
     private readonly PanelStateStore stateStore;
     private readonly ObsWebSocketClient obsClient = new();
     private readonly SemaphoreSlim operationLock = new(1, 1);
@@ -562,7 +565,56 @@ public sealed class PanelCoordinator : BackgroundService
         }
 
         autoAssembleInFlight = true;
-        _ = Task.Run(BuildFinalVideoAsync);
+        _ = Task.Run(BuildFinalVideoAfterRoomClipFlushAsync);
+    }
+
+    private async Task<ApiResult> BuildFinalVideoAfterRoomClipFlushAsync()
+    {
+        await RequestRoomClipSampleFlushAsync(CancellationToken.None);
+        return await BuildFinalVideoAsync();
+    }
+
+    private async Task RequestRoomClipSampleFlushAsync(CancellationToken cancellationToken)
+    {
+        var roomEventsDirectory = ResolveRoomEventsDirectory(stateStore.GetSettings().RoomEventsPath);
+        if (string.IsNullOrWhiteSpace(roomEventsDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(roomEventsDirectory);
+            var requestId = Guid.NewGuid().ToString("N");
+            var requestPath = Path.Combine(roomEventsDirectory, RoomClipFlushRequestFileName);
+            var ackPath = Path.Combine(roomEventsDirectory, RoomClipFlushAckFileName);
+            TryDeleteFile(ackPath);
+            await File.WriteAllTextAsync(requestPath, requestId, cancellationToken);
+
+            var deadline = DateTimeOffset.UtcNow + RoomClipFlushTimeout;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (File.Exists(ackPath))
+                {
+                    var ack = (await File.ReadAllTextAsync(ackPath, cancellationToken)).Trim();
+                    if (string.Equals(ack, requestId, StringComparison.Ordinal))
+                    {
+                        TryDeleteFile(requestPath);
+                        return;
+                    }
+                }
+
+                await Task.Delay(50, cancellationToken);
+            }
+
+            TryDeleteFile(requestPath);
+        }
+        catch
+        {
+            // Best effort: older mod builds do not understand the request file, and
+            // final assembly must still proceed after the bounded wait.
+        }
     }
 
     private async Task AppendCapabilitiesEventAsync(PanelSettings settings, ObsHello? hello)
@@ -627,6 +679,29 @@ public sealed class PanelCoordinator : BackgroundService
             .ThenByDescending(candidate => candidate.LastWriteTimeUtc)
             .First()
             .Path;
+    }
+
+    private static string? ResolveRoomEventsDirectory(string configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(configuredPath);
+            if (Directory.Exists(fullPath))
+            {
+                return fullPath;
+            }
+
+            return Path.GetDirectoryName(fullPath);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<string> EnumerateRoomEventCandidates(string configuredPath)
