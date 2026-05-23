@@ -43,8 +43,10 @@
 | `TryFindLoadLevelPlayerPositionBoundary` | 给所有可匹配到采样的 `load_level` 起点/终点边界改用对应 `player_position_sample.Utc`。 |
 | `load_level_player_position_start` | 成功把片段起点从 `load_level` 时间改成采样时间时写入的 reason。 |
 | `load_level_player_position_end` | 成功把片段终点从 `load_level` 时间改成采样时间时写入的 reason。 |
-| `room_entry_load_player_position_end` | 单独进房片段使用初始 load 的采样作为终点时写入的 reason。 |
+| `room_entry_load_player_position_end` | 单独进房片段使用初始 load 的采样作为终点时写入的 reason；末尾 `room_enter -> load_level` 也会直接采用对应 sample 的时间戳。 |
 | `room_entry_load_death_reload` | 单独进房片段没有采样，改用 death-reload 回退时写入的 reason。 |
+
+起始段选择顺序：有 `session_start` 时从 `session_start` 开始；没有 `session_start` 时从第一个 `room_enter` 开始；如果整段事件缺少 `room_enter`，`AddSyntheticRoomEnterForLoadPositionFallback(...)` 会用第一个 `load_level` / `player_position_sample` 合成入口，按 `room_enter -> load_position` 片段继续后续匹配。
 
 ## OBS helper / 面板设置参数
 
@@ -58,7 +60,7 @@
 | `MaxCutErrorMs` | 100 ms | `PanelSettings.MaxCutErrorMs` | ffmpeg 切点误差容忍。 |
 | `SplitOnPause` | true | `PanelSettings.SplitOnPause` | pause 区间是否自动切开。 |
 | `RequireExistingFiles` | true | `PanelSettings.RequireExistingFiles` | 是否要求源录制文件存在。 |
-| `LogOutputEnabled` | false | `CelesteAutoCut/CelesteReplaySettings.cs` / `ObsClipPanel/PanelModels.cs` | 默认关闭；关闭时成功生成视频后清理全部匹配的 `room_event_*.jsonl`、helper stdout/stderr，以及当前 `obs_auto/sessions/<session-id>/` 工作目录。 |
+| `LogOutputEnabled` | false | `CelesteAutoCut/CelesteReplaySettings.cs` / `ObsClipPanel/PanelModels.cs` | 默认关闭；关闭时成功生成视频后清理全部匹配的 `room_event_*.jsonl`、helper stdout/stderr，以及当前 `obs_auto/sessions/<session-id>/` 工作目录；活动日志被清理后不会被 late sample 重新创建成只含 `player_position_sample` 的残片。 |
 
 设置流向：
 

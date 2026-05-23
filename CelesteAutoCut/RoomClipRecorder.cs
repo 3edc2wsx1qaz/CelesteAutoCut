@@ -57,6 +57,7 @@ internal sealed class RoomClipRecorder {
     private double bestPlayerPositionSampleDistanceSquared = double.MaxValue;
     private long bestPlayerPositionSampleFrame = long.MinValue;
     private string eventLogPath = string.Empty;
+    private bool eventLogCreated;
 
     public RoomClipRecorder(ReplayController replayController) {
         this.replayController = replayController;
@@ -75,6 +76,7 @@ internal sealed class RoomClipRecorder {
 
         Directory.CreateDirectory(replayController.ReplayDirectory);
         eventLogPath = CreateTimestampedEventLogPath(replayController.ReplayDirectory);
+        eventLogCreated = false;
 
         active = true;
         sessionId = Guid.NewGuid().ToString("N");
@@ -214,6 +216,7 @@ internal sealed class RoomClipRecorder {
         areaMode = null;
         chapter = null;
         eventLogPath = string.Empty;
+        eventLogCreated = false;
         gameFrame = 0;
         statusDirty = false;
         lastStatusWriteFrame = long.MinValue;
@@ -473,12 +476,23 @@ internal sealed class RoomClipRecorder {
         Directory.CreateDirectory(replayController.ReplayDirectory);
         if (string.IsNullOrWhiteSpace(eventLogPath)) {
             eventLogPath = CreateTimestampedEventLogPath(replayController.ReplayDirectory);
+            eventLogCreated = false;
+        }
+
+        if (eventLogCreated && !File.Exists(eventLogPath)) {
+            // The OBS helper may delete the active room-event log after a successful
+            // build when Output Logs is disabled. Do not recreate that path with a
+            // late player_position_sample/session_end-only fragment; the retained
+            // room_event_*.jsonl files must be complete event logs.
+            return;
         }
 
         using (var stream = new FileStream(EventLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
         using (var writer = new StreamWriter(stream)) {
             writer.WriteLine(JsonSerializer.Serialize(entry, jsonOptions));
         }
+
+        eventLogCreated = true;
     }
 
     private static string CreateTimestampedEventLogPath(string replayDirectory) {

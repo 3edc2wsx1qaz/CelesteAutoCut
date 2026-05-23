@@ -1,20 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "TW1ianpIoRA=",
+  "dgSpecHash": "/858PsIRPlI=",
   "success": true,
   "projectFilePath": "C:\\Users\\18254\\Desktop\\celeste_replay_mod\\CelesteReplay\\ObsClipSidecar\\ObsClipSidecar.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\18254\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.26\\microsoft.net.illink.tasks.8.0.26.nupkg.sha512",
     "C:\\Users\\18254\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.26\\microsoft.netcore.app.runtime.win-x64.8.0.26.nupkg.sha512",
     "C:\\Users\\18254\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.26\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.26.nupkg.sha512",
     "C:\\Users\\18254\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.26\\microsoft.aspnetcore.app.runtime.win-x64.8.0.26.nupkg.sha512"
   ],
-  "logs": [
-    {
-      "code": "NU1900",
-      "level": "Warning",
-      "warningLevel": 1,
-      "message": "获取包漏洞数据时出错: 由于在 60000 毫秒内未接收到数据，“https://api.nuget.org/v3/vulnerabilities/vulnerability.base.json”的下载超时。"
-    }
-  ]
+  "logs": []
 }

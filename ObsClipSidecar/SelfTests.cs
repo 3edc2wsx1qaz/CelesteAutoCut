@@ -30,6 +30,9 @@ public static class SelfTests
             ("room entry death reload uses reload sample boundary", RoomEntryDeathReloadUsesReloadSampleBoundary),
             ("room entry death reload ignores deaths outside window", RoomEntryDeathReloadIgnoresDeathsOutsideWindow),
             ("standalone room entry load gets delay", StandaloneRoomEntryLoadGetsDelay),
+            ("standalone room entry load ends at matching sample without spawn point", StandaloneRoomEntryLoadEndsAtMatchingSampleWithoutSpawnPoint),
+            ("load position fallback creates intro without room enter", LoadPositionFallbackCreatesIntroWithoutRoomEnter),
+            ("session start uses load position fallback without room enter", SessionStartUsesLoadPositionFallbackWithoutRoomEnter),
             ("room entry intro survives respawn then exit without success", RoomEntryIntroSurvivesRespawnThenExitWithoutSuccess),
             ("first room transition load level does not cut off intro", FirstRoomTransitionLoadLevelDoesNotCutOffIntro),
             ("death room keeps room-entry intro before successful attempt", DeathRoomKeepsIntroBeforeClear),
@@ -623,6 +626,76 @@ public static class SelfTests
         Assert(entryLoad.StartOutputDurationMs == 2_000, "room entry load delay must not add preroll");
         Assert(entryLoad.EndOutputDurationMs == 2_700, "standalone room_enter -> load_level should keep a post-load delay");
         Assert(entryLoad.Reasons.Contains("room_entry_load_delay"), "standalone room entry load delay should be annotated");
+    }
+
+    private static void StandaloneRoomEntryLoadEndsAtMatchingSampleWithoutSpawnPoint()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var sample = load.AddMilliseconds(350);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "player_position_sample", Utc = sample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 12, 34) }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 500,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.Reasons.Contains("room_entry_load_player_position_end"));
+        Assert(entryLoad.StartUtc == start && entryLoad.EndUtc == sample, "terminal room_enter -> load_level should end at the matching player_position_sample timestamp");
+        Assert(entryLoad.EndOutputDurationMs == 2_550, "sample-bounded terminal room entry should not add the standalone post-load delay");
+    }
+
+    private static void LoadPositionFallbackCreatesIntroWithoutRoomEnter()
+    {
+        var load = BaseUtc.AddSeconds(2);
+        var sample = load.AddMilliseconds(250);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "player_position_sample", Utc = sample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 10, 20) },
+            new() { EventType = "exit", Utc = load.AddSeconds(1), Room = "a", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.Reasons.Contains("room_entry_load_player_position_end"));
+        Assert(entryLoad.StartUtc == load && entryLoad.EndUtc == sample, "without room_enter, the first load position should synthesize a room entry intro");
+    }
+
+    private static void SessionStartUsesLoadPositionFallbackWithoutRoomEnter()
+    {
+        var sessionStart = BaseUtc.AddSeconds(1);
+        var load = BaseUtc.AddSeconds(2);
+        var sample = load.AddMilliseconds(250);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "session_start", Utc = sessionStart, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = new Dictionary<string, object?> { ["playerIntro"] = "Transition" } },
+            new() { EventType = "player_position_sample", Utc = sample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 10, 20) },
+            new() { EventType = "exit", Utc = load.AddSeconds(1), Room = "a", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var intro = doc.Clips.Single(c => c.Reasons.Contains("load_level_player_position_end"));
+        Assert(intro.StartUtc == sessionStart && intro.EndUtc == sample, "session_start should remain the start boundary when room_enter is missing");
     }
 
     private static void RoomEntryIntroSurvivesRespawnThenExitWithoutSuccess()

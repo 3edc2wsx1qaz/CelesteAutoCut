@@ -211,6 +211,7 @@ public sealed class IntervalGenerator
 
     private static List<ClipCandidate> BuildLinearKeepCandidates(IReadOnlyList<RoomEvent> events, List<string> warnings)
     {
+        events = AddSyntheticRoomEnterForLoadPositionFallback(events);
         var result = new List<ClipCandidate>();
         var index = 0;
         var i = 0;
@@ -572,6 +573,14 @@ public sealed class IntervalGenerator
 
             if (IsPlayerPositionSample(current))
             {
+                if (IsSyntheticLoadPositionRoomEnter(roomEnter) && SameMapAndRoom(roomEnter, current))
+                {
+                    firstLoad = current;
+                    AddCandidate(result, ref index, roomEnter, firstLoad, roomEnter.Room ?? firstLoad.Room ?? "room", roomEnter.MapSid ?? firstLoad.MapSid, "room_entry_load", true);
+                    i++;
+                    return true;
+                }
+
                 i++;
                 continue;
             }
@@ -788,6 +797,58 @@ public sealed class IntervalGenerator
     {
         result.Add(new ClipCandidate(index++, start, end, room, mapSid, reason, isCheckpointIntro));
     }
+
+    private static IReadOnlyList<RoomEvent> AddSyntheticRoomEnterForLoadPositionFallback(IReadOnlyList<RoomEvent> events)
+    {
+        if (events.Any(IsRoomEntry))
+        {
+            return events;
+        }
+
+        var fallbackIndex = -1;
+        for (var i = 0; i < events.Count; i++)
+        {
+            if (IsLoadPositionFallbackStart(events[i]))
+            {
+                fallbackIndex = i;
+                break;
+            }
+        }
+
+        if (fallbackIndex < 0)
+        {
+            return events;
+        }
+
+        var fallback = events[fallbackIndex];
+        var syntheticRoomEnter = fallback with
+        {
+            EventType = "room_enter",
+            Utc = fallback.Utc,
+            EventId = "synthetic-room-enter-" + fallback.EventId,
+            Notes = AddSyntheticLoadPositionFallbackNote(fallback.Notes)
+        };
+
+        var normalized = events.ToList();
+        normalized.Insert(fallbackIndex, syntheticRoomEnter);
+        return normalized;
+    }
+
+    private static bool IsLoadPositionFallbackStart(RoomEvent e)
+        => string.Equals(e.EventType, "load_level", StringComparison.Ordinal) ||
+           IsPlayerPositionSample(e);
+
+    private static Dictionary<string, object?> AddSyntheticLoadPositionFallbackNote(Dictionary<string, object?>? notes)
+    {
+        var result = notes is null
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(notes);
+        result["syntheticRoomEnter"] = "load_position_fallback";
+        return result;
+    }
+
+    private static bool IsSyntheticLoadPositionRoomEnter(RoomEvent e)
+        => string.Equals(GetNoteString(e, "syntheticRoomEnter"), "load_position_fallback", StringComparison.Ordinal);
 
     private static void EnsureRoomEntryIntroCandidate(List<ClipCandidate> result, ref int index, RoomIntro intro)
     {
@@ -1193,10 +1254,7 @@ public sealed class IntervalGenerator
     {
         dynamicEnd = candidate.End;
         dynamicEndIsStationary = false;
-        if (!TryGetSpawnPoint(candidate.End, out var spawnPoint))
-        {
-            return false;
-        }
+        var hasSpawnPoint = TryGetSpawnPoint(candidate.End, out var spawnPoint);
 
         var loadIndex = -1;
         for (var i = 0; i < events.Count; i++)
@@ -1222,8 +1280,19 @@ public sealed class IntervalGenerator
             if (IsPlayerPositionSample(current))
             {
                 if (!SameMapAndRoom(candidate.End, current) ||
-                    !SampleBelongsToLoad(current, candidate.End) ||
-                    !TryGetPlayerPosition(current, out var position))
+                    !SampleBelongsToLoad(current, candidate.End))
+                {
+                    continue;
+                }
+
+                if (!hasSpawnPoint)
+                {
+                    dynamicEnd = current;
+                    dynamicEndIsStationary = IsStationaryPlayerPositionSample(current);
+                    return true;
+                }
+
+                if (!TryGetPlayerPosition(current, out var position))
                 {
                     continue;
                 }
