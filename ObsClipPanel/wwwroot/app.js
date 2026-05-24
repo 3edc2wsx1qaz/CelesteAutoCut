@@ -32,7 +32,7 @@ function fillSettings(settings) {
   el.postRollMs.value = settings.postRollMs ?? 500;
   el.maxAnchorGapMs.value = settings.maxAnchorGapMs ?? 2000;
   el.maxCutErrorMs.value = settings.maxCutErrorMs ?? 100;
-  el.clipIntensity.value = settings.clipIntensity || 'high';
+  el.clipIntensity.value = settings.clipIntensity || 'low';
   el.splitOnPause.checked = !!settings.splitOnPause;
   el.requireExistingFiles.checked = !!settings.requireExistingFiles;
   el.autoAssembleOnStop.checked = !!settings.autoAssembleOnStop;
@@ -53,7 +53,7 @@ function readSettings() {
     postRollMs: Number(el.postRollMs.value || 500),
     maxAnchorGapMs: Number(el.maxAnchorGapMs.value || 2000),
     maxCutErrorMs: Number(el.maxCutErrorMs.value || 100),
-    clipIntensity: el.clipIntensity.value || 'high',
+    clipIntensity: el.clipIntensity.value || 'low',
     splitOnPause: el.splitOnPause.checked,
     requireExistingFiles: el.requireExistingFiles.checked,
     autoAssembleOnStop: el.autoAssembleOnStop.checked,

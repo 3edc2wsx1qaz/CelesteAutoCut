@@ -64,7 +64,9 @@ public static class Program
             PostRollMs = GetLong(values, "post-roll-ms", 500),
             MaxAllowedAnchorGapMs = GetLong(values, "max-anchor-gap-ms", 2_000),
             MaxAllowedCutErrorMs = GetLong(values, "max-cut-error-ms", 100),
-            ClipIntensity = ClipIntensityModes.Normalize(values.GetValueOrDefault("clip-intensity")),
+            ClipIntensity = values.TryGetValue("clip-intensity", out var clipIntensity)
+                ? ClipIntensityModes.Normalize(clipIntensity)
+                : ClipIntensityModes.Low,
             SplitOnPause = GetBool(values, "split-on-pause", true),
             RequireExistingFiles = GetBool(values, "require-existing-files", false)
         };

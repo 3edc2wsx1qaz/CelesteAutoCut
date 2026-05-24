@@ -92,6 +92,7 @@ internal sealed class ObsAutoAssemblerLauncher {
             startInfo.Environment["CELESTE_REPLAY_ROOM_EVENTS_PATH"] = roomEventsPath;
             startInfo.Environment["CELESTE_REPLAY_AUTO_ASSEMBLE_ON_STOP"] = "true";
             startInfo.Environment["CELESTE_REPLAY_REQUIRE_EXISTING_FILES"] = "true";
+            startInfo.Environment["CELESTE_REPLAY_CLIP_INTENSITY"] = CelesteAutoCutModule.Settings.ClipIntensity.ToString().ToLowerInvariant();
             startInfo.Environment["CELESTE_REPLAY_LOG_OUTPUT_ENABLED"] = CelesteAutoCutModule.Settings.LogOutputEnabled ? "true" : "false";
             startInfo.Environment["CELESTE_REPLAY_PARENT_PID"] = Environment.ProcessId.ToString();
             startInfo.Environment["CELESTE_REPLAY_PARENT_START_TICKS"] = Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks.ToString();

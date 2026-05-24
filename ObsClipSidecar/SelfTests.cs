@@ -9,6 +9,7 @@ public static class SelfTests
         var tests = new (string Name, Action Body)[]
         {
             ("multiple recordings select matching recording", MultipleRecordings),
+            ("clip intensity default is low", ClipIntensityDefaultIsLow),
             ("cross recording clips are invalidated", CrossRecordingInvalid),
             ("split file maps clip into multiple slices", SplitFile),
             ("pause overlap splits clip and marks pause policy", PauseOverlap),
@@ -99,6 +100,11 @@ public static class SelfTests
         Assert(doc.Clips.Count >= 1, "expected at least one valid clip");
         Assert(doc.Clips.All(c => c.RecordingId == "r2"), "clips should bind to second recording");
         Assert(doc.Clips.All(c => c.SourceFileMapping[0].SourcePath == "new.mp4"), "clips should use matching recording file");
+    }
+
+    private static void ClipIntensityDefaultIsLow()
+    {
+        Assert(new IntervalGenerationOptions().ClipIntensity == ClipIntensityModes.Low, "IntervalGenerationOptions should default to low intensity");
     }
 
     private static void CrossRecordingInvalid()
@@ -1116,7 +1122,7 @@ public static class SelfTests
             new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
         };
 
-        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, LowOptions());
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
         var success = doc.Clips.Single(c => c.Reasons.Contains("final_successful_attempt"));
         Assert(success.StartUtc == respawnLoad, "low intensity should keep load_level timestamp instead of player_position_sample timestamp");
@@ -1138,7 +1144,7 @@ public static class SelfTests
             new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
         };
 
-        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, LowOptions());
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
         var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == load);
         Assert(intro is not null, "low intensity should keep room_enter -> first load_level as the selected entry interval across death/reload");
@@ -1157,7 +1163,7 @@ public static class SelfTests
             new() { EventType = "exit", Utc = exit, Room = "a", MapSid = "map" }
         };
 
-        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, LowOptions());
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
         Assert(doc.Clips.Count == 1, "low final exit tail should replace the intro-only clip");
         Assert(doc.Clips[0].StartUtc == load && doc.Clips[0].EndUtc == exit, "low final exit tail should keep load_level -> exit");
@@ -1175,7 +1181,7 @@ public static class SelfTests
             new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) }
         };
 
-        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [recording] }, LowOptions());
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [recording] });
 
         Assert(doc.Clips.Count == 1, "low final recording-end tail should replace the intro-only clip");
         Assert(doc.Clips[0].StartUtc == load && doc.Clips[0].EndUtc == BaseUtc.AddSeconds(10), "low final tail should keep load_level -> recording end");
@@ -1550,7 +1556,12 @@ public static class SelfTests
     };
 
     private static ClipIntervalsDocument Generate(List<RoomEvent> events, SessionManifest manifest, IntervalGenerationOptions? options = null) =>
-        new IntervalGenerator().Generate(events, manifest, options ?? new IntervalGenerationOptions { MaxAllowedAnchorGapMs = 1_500 });
+        new IntervalGenerator().Generate(events, manifest, options is null
+            ? new IntervalGenerationOptions { MaxAllowedAnchorGapMs = 1_500, ClipIntensity = ClipIntensityModes.High }
+            : options with { ClipIntensity = ClipIntensityModes.High });
+
+    private static ClipIntervalsDocument GenerateLow(List<RoomEvent> events, SessionManifest manifest) =>
+        new IntervalGenerator().Generate(events, manifest, LowOptions());
 
     private static IntervalGenerationOptions LowOptions() => new()
     {
