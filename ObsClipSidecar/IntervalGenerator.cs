@@ -31,7 +31,7 @@ public sealed class IntervalGenerator
             .Select(x => x.Event)
             .ToList();
 
-        var candidates = MergeAdjacentKeepCandidates(BuildLinearKeepCandidates(sortedEvents, manifest, options, warnings))
+        var candidates = MergeAdjacentKeepCandidates(BuildLinearKeepCandidates(sortedEvents, manifest, options, warnings), sortedEvents, highIntensity)
             .Select((c, index) => c with { Index = index })
             .ToList();
         var prepared = new List<PreparedClip>();
@@ -555,7 +555,10 @@ public sealed class IntervalGenerator
         return result;
     }
 
-    private static List<ClipCandidate> MergeAdjacentKeepCandidates(IReadOnlyList<ClipCandidate> candidates)
+    private static List<ClipCandidate> MergeAdjacentKeepCandidates(
+        IReadOnlyList<ClipCandidate> candidates,
+        IReadOnlyList<RoomEvent> events,
+        bool highIntensity)
     {
         if (candidates.Count <= 1)
         {
@@ -572,7 +575,7 @@ public sealed class IntervalGenerator
             }
 
             var previous = result[^1];
-            if (CanMergeAdjacent(previous, candidate))
+            if (CanMergeAdjacent(previous, candidate, events, highIntensity))
             {
                 result[^1] = previous with
                 {
@@ -591,10 +594,17 @@ public sealed class IntervalGenerator
         return result;
     }
 
-    private static bool CanMergeAdjacent(ClipCandidate previous, ClipCandidate current)
+    private static bool CanMergeAdjacent(
+        ClipCandidate previous,
+        ClipCandidate current,
+        IReadOnlyList<RoomEvent> events,
+        bool highIntensity)
         => previous.End.Utc == current.Start.Utc &&
            string.Equals(previous.MapSid ?? string.Empty, current.MapSid ?? string.Empty, StringComparison.Ordinal) &&
-           !string.Equals(previous.BaseValidReason, "room_entry_load_death_reload", StringComparison.Ordinal);
+           !string.Equals(previous.BaseValidReason, "room_entry_load_death_reload", StringComparison.Ordinal) &&
+           (highIntensity ||
+            !IsStandaloneRoomEntryLoad(current) ||
+            !TryFindRoomEntryDeathReloadEnd(events, current.End, null, out _));
 
     private static string BuildMergedReason(string previous, string current)
     {

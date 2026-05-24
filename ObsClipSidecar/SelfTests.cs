@@ -50,6 +50,7 @@ public static class SelfTests
             ("interrupted recording keeps final room-entry intro without exit", InterruptedRecordingKeepsFinalRoomEntryIntroWithoutExit),
             ("low intensity keeps load timestamps", LowIntensityKeepsLoadTimestamps),
             ("low intensity death reload keeps entry and resumes at reload", LowIntensityDeathReloadKeepsEntryAndResumesAtReload),
+            ("low intensity death reload survives transition tail merge", LowIntensityDeathReloadSurvivesTransitionTailMerge),
             ("low intensity death reload resume has unlimited window", LowIntensityDeathReloadResumeHasUnlimitedWindow),
             ("low intensity death reload exit keeps entry and reload tail", LowIntensityDeathReloadExitKeepsEntryAndReloadTail),
             ("low intensity final load keeps exit tail", LowIntensityFinalLoadKeepsExitTail),
@@ -1160,6 +1161,33 @@ public static class SelfTests
         var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
         Assert(success.StartUtc == respawnLoad && success.EndUtc == clear, "low intensity should resume later matching from the reload load_level");
         Assert(!success.Reasons.Contains("load_level_player_position_start"), "low intensity should not rewrite reload load_level to player sample time");
+    }
+
+    private static void LowIntensityDeathReloadSurvivesTransitionTailMerge()
+    {
+        var previousTransition = BaseUtc.AddSeconds(1);
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var respawnLoad = start.AddSeconds(1);
+        var clear = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "transition", Utc = previousTransition, Room = "prev", NextRoom = "a", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(700), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) },
+            new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
+
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == respawnLoad);
+        Assert(intro is not null, "low death-reload room entry must not be swallowed by the previous transition tail merge");
+        Assert(intro!.Reasons.Contains("room_entry_load_death_reload"), "the final clip interval should include the selected low death-reload entry reason");
+
+        var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
+        Assert(success.Reasons.Contains("final_successful_attempt"), "low intensity should still resume matching from the reload load_level after preserving the entry death");
     }
 
     private static void LowIntensityDeathReloadResumeHasUnlimitedWindow()
