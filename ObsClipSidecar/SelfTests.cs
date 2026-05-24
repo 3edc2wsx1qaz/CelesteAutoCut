@@ -58,6 +58,7 @@ public static class SelfTests
             ("low intensity final load keeps exit tail", LowIntensityFinalLoadKeepsExitTail),
             ("low intensity final load keeps recording end tail", LowIntensityFinalLoadKeepsRecordingEndTail),
             ("low intensity final death reload omits recording end tail", LowIntensityFinalDeathReloadOmitsRecordingEndTail),
+            ("high intensity without session start falls back to first load level before room enter", HighIntensityWithoutSessionStartFallsBackToFirstLoadLevelBeforeRoomEnter),
             ("high intensity interaction delays room entry sample", HighIntensityInteractionDelaysRoomEntrySample),
             ("postroll at recording end is clamped", PostrollAtRecordingEndIsClamped),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
@@ -1357,6 +1358,34 @@ public static class SelfTests
         Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == respawnLoad, "low final death-reload should end at the reload load_level, not recording end");
         Assert(doc.Clips[0].Reasons.Contains("room_entry_load_death_reload"), "low final death-reload should carry the death-reload reason");
         Assert(!doc.Clips.Any(c => c.Reasons.Contains("low_load_to_recording_end")), "low final death-reload should not add a reload -> recording end tail");
+    }
+
+    private static void HighIntensityWithoutSessionStartFallsBackToFirstLoadLevelBeforeRoomEnter()
+    {
+        var load = BaseUtc.AddSeconds(2);
+        var sample = load.AddMilliseconds(250);
+        var laterRoomEnter = BaseUtc.AddSeconds(4);
+        var laterLoad = BaseUtc.AddSeconds(4.2);
+        var laterExit = BaseUtc.AddSeconds(5);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "player_position_sample", Utc = sample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 10, 10) },
+            new() { EventType = "room_enter", Utc = laterRoomEnter, Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = laterLoad, Room = "b", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "exit", Utc = laterExit, Room = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 8_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == load && c.EndUtc == sample);
+        Assert(intro is not null, "high intensity should synthesize [room_enter, load_level] from the first load_level before a later real room_enter when session_start is missing");
+        Assert(intro!.Reasons.Contains("room_entry_load_player_position_end"), "high fallback entry should still use the player-position end boundary");
     }
 
     private static void HighIntensityInteractionDelaysRoomEntrySample()
