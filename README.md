@@ -85,7 +85,7 @@ URL:  http://127.0.0.1:38500
 - 查看当前录制状态和 session 路径；
 - 手动开始、停止、暂停、继续录制；
 - 手动触发“生成最终视频”；
-- 设置 OBS WebSocket 密码、输出目录、`ffmpeg.exe` 路径和最终文件名模板。
+- 设置 OBS WebSocket 密码、输出目录、`ffmpeg.exe` 路径、最终文件名模板和剪辑强度。
 
 ## 输出位置
 
@@ -125,6 +125,19 @@ E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 | --- | --- |
 | `Output Directory` / `输出目录` | 最终剪辑视频的输出根目录。留空时使用 OBS 录制目录。每张地图仍会输出到对应地图名子文件夹。 |
 | `Output Logs` / `输出日志` | 默认关闭。开启后会保留 room event、OBS event、clip intervals、片段选择、assembly 报告、ffconcat 和 helper stdout/stderr 日志，方便排查问题。关闭时成功生成最终视频后，会清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr 以及本次 `obs_auto/sessions/<session-id>/` 工作目录。 |
+
+## 剪辑强度
+
+OBS 面板里的 `剪辑强度` 默认为 `High`：
+
+- `High`：使用原来的精确规则。`load_level` 边界会继续优先用对应的 `player_position_sample` 时间戳微调；进房后如果检测到望远镜或对话事件，会先保留 `load_level -> 望远镜/对话` 这段，并在望远镜/对话结束后重新开始进房采样。
+- `Low`：使用更宽松的保留规则。`load_level` 边界直接使用原始 `load_level` 时间戳；`room_enter -> load_level -> death -> load_level` 保持选择最初的 `room_enter -> load_level` 进房区间；最后一个未通关的进房段会保留 `load_level -> exit`，没有 `exit` 时保留 `load_level -> 录制末尾`。
+
+命令行生成 intervals 时也可以传：
+
+```powershell
+..\.dotnet\dotnet.exe run --project .\ObsClipSidecar\ObsClipSidecar.csproj -- generate-intervals --room-events room_events.jsonl --session-manifest session_manifest.json --out clip_intervals.json --clip-intensity low
+```
 
 ## 中间文件和日志
 

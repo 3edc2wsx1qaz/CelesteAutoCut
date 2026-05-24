@@ -56,6 +56,7 @@ internal sealed class RoomClipRecorder {
     private bool bestPlayerPositionSampleIsStationary;
     private double bestPlayerPositionSampleDistanceSquared = double.MaxValue;
     private long bestPlayerPositionSampleFrame = long.MinValue;
+    private int roomEntryInteractionDepth;
     private string eventLogPath = string.Empty;
     private bool eventLogCreated;
 
@@ -188,6 +189,46 @@ internal sealed class RoomClipRecorder {
         }
 
         WriteEvent(RoomClipEventTypes.StrawberryCollect, currentRoomOr(strawberry.SceneAs<Level>()?.Session.Level));
+    }
+
+    public void OnInteractionStart(Level? level, string eventType, string kind) {
+        EnsureActiveLevel(level);
+        if (!active) {
+            return;
+        }
+
+        WriteEvent(eventType, currentRoomOr(level?.Session.Level), notes: new Dictionary<string, string?> {
+            ["kind"] = kind
+        });
+
+        if (playerPositionSampleMode == PlayerPositionSampleMode.RoomEntryBestWithinWindow) {
+            roomEntryInteractionDepth++;
+            ResetBestPlayerPositionSample();
+        }
+    }
+
+    public void OnInteractionEnd(Level? level, string eventType, string kind) {
+        EnsureActiveLevel(level);
+        if (!active) {
+            return;
+        }
+
+        WriteEvent(eventType, currentRoomOr(level?.Session.Level), notes: new Dictionary<string, string?> {
+            ["kind"] = kind
+        });
+
+        if (playerPositionSampleMode == PlayerPositionSampleMode.RoomEntryBestWithinWindow) {
+            if (roomEntryInteractionDepth > 0) {
+                roomEntryInteractionDepth--;
+            }
+
+            if (roomEntryInteractionDepth == 0) {
+                ResetBestPlayerPositionSample();
+                playerPositionSampleStartFrame = gameFrame + PlayerPositionSampleStartDelayFrames;
+                playerPositionSampleUntilFrame = playerPositionSampleStartFrame + PlayerPositionSampleWindowFrames;
+                lastPlayerPositionSampleFrame = long.MinValue;
+            }
+        }
     }
 
     public void Shutdown() {
@@ -335,6 +376,11 @@ internal sealed class RoomClipRecorder {
         }
 
         if (playerPositionSampleMode == PlayerPositionSampleMode.RoomEntryBestWithinWindow &&
+            roomEntryInteractionDepth > 0) {
+            return;
+        }
+
+        if (playerPositionSampleMode == PlayerPositionSampleMode.RoomEntryBestWithinWindow &&
             gameFrame > playerPositionSampleUntilFrame) {
             FlushPlayerPositionSample();
             ClearPlayerPositionSampling();
@@ -439,6 +485,30 @@ internal sealed class RoomClipRecorder {
         playerPositionSampleUntilFrame = long.MinValue;
         lastPlayerPositionSampleFrame = long.MinValue;
         playerPositionSampleMode = PlayerPositionSampleMode.None;
+        pendingPlayerPositionSample = null;
+        bestPlayerPositionSampleEvent = null;
+        bestPlayerPositionSampleIsStationary = false;
+        bestPlayerPositionSampleDistanceSquared = double.MaxValue;
+        bestPlayerPositionSampleFrame = long.MinValue;
+        roomEntryInteractionDepth = 0;
+    }
+
+    private void EnsureActiveLevel(Level? level) {
+        if (level is null) {
+            return;
+        }
+
+        var session = level.Session;
+        if (!active || !ReferenceEquals(observedSession, session)) {
+            Start(session, fromSaveData: false);
+        }
+
+        observedSession = session;
+        currentRoom = session.Level ?? currentRoom;
+        lastObservedRoom = currentRoom;
+    }
+
+    private void ResetBestPlayerPositionSample() {
         pendingPlayerPositionSample = null;
         bestPlayerPositionSampleEvent = null;
         bestPlayerPositionSampleIsStationary = false;

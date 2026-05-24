@@ -188,6 +188,7 @@ public sealed class PanelCoordinator : BackgroundService
                 PostRollMs = settings.PostRollMs,
                 MaxAllowedAnchorGapMs = settings.MaxAnchorGapMs,
                 MaxAllowedCutErrorMs = settings.MaxCutErrorMs,
+                ClipIntensity = settings.ClipIntensity,
                 SplitOnPause = settings.SplitOnPause,
                 RequireExistingFiles = settings.RequireExistingFiles
             });

@@ -41,6 +41,7 @@ public sealed class PanelStateStore
             PostRollMs = current.PostRollMs,
             MaxAnchorGapMs = current.MaxAnchorGapMs,
             MaxCutErrorMs = current.MaxCutErrorMs,
+            ClipIntensity = ClipIntensityModes.Normalize(current.ClipIntensity),
             SplitOnPause = current.SplitOnPause,
             RequireExistingFiles = current.RequireExistingFiles,
             AutoAssembleOnStop = current.AutoAssembleOnStop,
@@ -112,6 +113,7 @@ public sealed class PanelStateStore
             PostRollMs = Math.Max(0, input.PostRollMs),
             MaxAnchorGapMs = Math.Max(100, input.MaxAnchorGapMs),
             MaxCutErrorMs = Math.Max(0, input.MaxCutErrorMs),
+            ClipIntensity = ClipIntensityModes.Normalize(input.ClipIntensity),
             SplitOnPause = input.SplitOnPause,
             RequireExistingFiles = input.RequireExistingFiles,
             AutoAssembleOnStop = input.AutoAssembleOnStop,
@@ -337,6 +339,7 @@ public sealed class PanelStateStore
             PostRollMs = ReadLong("CELESTE_REPLAY_POST_ROLL_MS") ?? settings.PostRollMs,
             MaxAnchorGapMs = ReadLong("CELESTE_REPLAY_MAX_ANCHOR_GAP_MS") ?? settings.MaxAnchorGapMs,
             MaxCutErrorMs = ReadLong("CELESTE_REPLAY_MAX_CUT_ERROR_MS") ?? settings.MaxCutErrorMs,
+            ClipIntensity = ClipIntensityModes.Normalize(Read("CELESTE_REPLAY_CLIP_INTENSITY") ?? settings.ClipIntensity),
             SplitOnPause = ReadBool("CELESTE_REPLAY_SPLIT_ON_PAUSE") ?? settings.SplitOnPause,
             RequireExistingFiles = ReadBool("CELESTE_REPLAY_REQUIRE_EXISTING_FILES") ?? settings.RequireExistingFiles,
             AutoAssembleOnStop = ReadBool("CELESTE_REPLAY_AUTO_ASSEMBLE_ON_STOP") ?? settings.AutoAssembleOnStop,
@@ -349,6 +352,7 @@ public sealed class PanelStateStore
     {
         return settings with
         {
+            ClipIntensity = ClipIntensityModes.Normalize(settings.ClipIntensity),
             FinalOutputName = MigrateLegacyFinalOutputName(settings.FinalOutputName)
         };
     }

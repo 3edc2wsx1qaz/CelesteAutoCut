@@ -47,6 +47,11 @@ public static class SelfTests
             ("branch return to hub room is kept", BranchReturnToHubRoomIsKept),
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("interrupted recording keeps final room-entry intro without exit", InterruptedRecordingKeepsFinalRoomEntryIntroWithoutExit),
+            ("low intensity keeps load timestamps", LowIntensityKeepsLoadTimestamps),
+            ("low intensity death reload keeps entry load intro", LowIntensityDeathReloadKeepsEntryLoadIntro),
+            ("low intensity final load keeps exit tail", LowIntensityFinalLoadKeepsExitTail),
+            ("low intensity final load keeps recording end tail", LowIntensityFinalLoadKeepsRecordingEndTail),
+            ("high intensity interaction delays room entry sample", HighIntensityInteractionDelaysRoomEntrySample),
             ("postroll at recording end is clamped", PostrollAtRecordingEndIsClamped),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
             ("invalid anchor gaps are reported", InvalidAnchorGap),
@@ -1094,6 +1099,118 @@ public static class SelfTests
         Assert(finalIntro!.Reasons.Contains("room_entry_load"), "interrupted final intro should keep the room_entry_load reason");
     }
 
+    private static void LowIntensityKeepsLoadTimestamps()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var respawnLoad = start.AddSeconds(1);
+        var respawnSample = respawnLoad.AddMilliseconds(250);
+        var clear = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(700), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "respawn-load", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = respawnSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("respawn-load", 100, 100) },
+            new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, LowOptions());
+
+        var success = doc.Clips.Single(c => c.Reasons.Contains("final_successful_attempt"));
+        Assert(success.StartUtc == respawnLoad, "low intensity should keep load_level timestamp instead of player_position_sample timestamp");
+        Assert(!success.Reasons.Contains("load_level_player_position_start"), "low intensity should not annotate dynamic load start");
+    }
+
+    private static void LowIntensityDeathReloadKeepsEntryLoadIntro()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var respawnLoad = start.AddSeconds(1);
+        var clear = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(700), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) },
+            new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, LowOptions());
+
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == load);
+        Assert(intro is not null, "low intensity should keep room_enter -> first load_level as the selected entry interval across death/reload");
+        Assert(!doc.Clips.Any(c => c.Reasons.Contains("room_entry_load_death_reload")), "low intensity should not extend the entry interval to the reload");
+    }
+
+    private static void LowIntensityFinalLoadKeepsExitTail()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(300);
+        var exit = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "exit", Utc = exit, Room = "a", MapSid = "map" }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, LowOptions());
+
+        Assert(doc.Clips.Count == 1, "low final exit tail should replace the intro-only clip");
+        Assert(doc.Clips[0].StartUtc == load && doc.Clips[0].EndUtc == exit, "low final exit tail should keep load_level -> exit");
+        Assert(doc.Clips[0].Reasons.Contains("low_load_to_exit"), "low final exit tail should carry the low_load_to_exit reason");
+    }
+
+    private static void LowIntensityFinalLoadKeepsRecordingEndTail()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(300);
+        var recording = Recording("r", BaseUtc, "run.mp4", 0, 10_000);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [recording] }, LowOptions());
+
+        Assert(doc.Clips.Count == 1, "low final recording-end tail should replace the intro-only clip");
+        Assert(doc.Clips[0].StartUtc == load && doc.Clips[0].EndUtc == BaseUtc.AddSeconds(10), "low final tail should keep load_level -> recording end");
+        Assert(doc.Clips[0].Reasons.Contains("low_load_to_recording_end"), "low final tail should carry the low_load_to_recording_end reason");
+    }
+
+    private static void HighIntensityInteractionDelaysRoomEntrySample()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var earlySample = start.AddMilliseconds(350);
+        var dialogStart = start.AddMilliseconds(500);
+        var dialogEnd = start.AddMilliseconds(900);
+        var lateSample = start.AddMilliseconds(1_200);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", EventId = "load-a", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 100, 100) },
+            new() { EventType = "player_position_sample", Utc = earlySample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 101, 100) },
+            new() { EventType = "dialog_start", Utc = dialogStart, Room = "a", MapSid = "map" },
+            new() { EventType = "dialog_end", Utc = dialogEnd, Room = "a", MapSid = "map" },
+            new() { EventType = "player_position_sample", Utc = lateSample, Room = "a", MapSid = "map", Notes = PlayerSampleNotes("load-a", 120, 100) }
+        };
+
+        var doc = Generate(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] }, new IntervalGenerationOptions
+        {
+            PreRollMs = 0,
+            PostRollMs = 0,
+            MaxAllowedAnchorGapMs = 1_500
+        });
+
+        var entryLoad = doc.Clips.Single(c => c.Reasons.Contains("room_entry_load_player_position_end"));
+        Assert(entryLoad.EndUtc == lateSample, "high intensity should discard pre-dialog samples and resume room-entry sampling after dialog/telescope end");
+    }
+
     private static void MissingRecordingFileMapping()
     {
         var recording = Recording("r", BaseUtc, [new RecordingFileManifest { Path = "too-short.mp4", StartDurationMs = 0, EndDurationMs = 2_000 }]);
@@ -1434,6 +1551,14 @@ public static class SelfTests
 
     private static ClipIntervalsDocument Generate(List<RoomEvent> events, SessionManifest manifest, IntervalGenerationOptions? options = null) =>
         new IntervalGenerator().Generate(events, manifest, options ?? new IntervalGenerationOptions { MaxAllowedAnchorGapMs = 1_500 });
+
+    private static IntervalGenerationOptions LowOptions() => new()
+    {
+        PreRollMs = 0,
+        PostRollMs = 0,
+        MaxAllowedAnchorGapMs = 1_500,
+        ClipIntensity = ClipIntensityModes.Low
+    };
 
     private static bool HasClipCovering(ClipIntervalsDocument doc, DateTimeOffset startUtc, DateTimeOffset endUtc) =>
         doc.Clips.Any(c => c.StartUtc <= startUtc && c.EndUtc >= endUtc);

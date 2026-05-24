@@ -13,6 +13,7 @@ public sealed record PanelSettings
     public long PostRollMs { get; init; } = 500;
     public long MaxAnchorGapMs { get; init; } = 2000;
     public long MaxCutErrorMs { get; init; } = 100;
+    public string ClipIntensity { get; init; } = ObsClipSidecar.ClipIntensityModes.High;
     public bool SplitOnPause { get; init; } = true;
     public bool RequireExistingFiles { get; init; } = true;
     public bool AutoAssembleOnStop { get; init; } = true;
@@ -33,6 +34,7 @@ public sealed record PanelSettingsInput
     public long PostRollMs { get; init; } = 500;
     public long MaxAnchorGapMs { get; init; } = 2000;
     public long MaxCutErrorMs { get; init; } = 100;
+    public string ClipIntensity { get; init; } = ObsClipSidecar.ClipIntensityModes.High;
     public bool SplitOnPause { get; init; } = true;
     public bool RequireExistingFiles { get; init; } = true;
     public bool AutoAssembleOnStop { get; init; } = true;
@@ -53,6 +55,7 @@ public sealed record PanelSettingsView
     public long PostRollMs { get; init; }
     public long MaxAnchorGapMs { get; init; }
     public long MaxCutErrorMs { get; init; }
+    public string ClipIntensity { get; init; } = ObsClipSidecar.ClipIntensityModes.High;
     public bool SplitOnPause { get; init; }
     public bool RequireExistingFiles { get; init; }
     public bool AutoAssembleOnStop { get; init; }

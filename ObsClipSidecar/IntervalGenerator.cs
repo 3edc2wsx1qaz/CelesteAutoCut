@@ -10,6 +10,8 @@ public sealed class IntervalGenerator
     public ClipIntervalsDocument Generate(IReadOnlyList<RoomEvent> roomEvents, SessionManifest manifest, IntervalGenerationOptions? options = null)
     {
         options ??= new IntervalGenerationOptions();
+        options = options with { ClipIntensity = ClipIntensityModes.Normalize(options.ClipIntensity) };
+        var highIntensity = ClipIntensityModes.IsHigh(options.ClipIntensity);
         var warnings = new List<string>();
         if (!manifest.Capabilities.SupportsOutputDurationAnchors)
         {
@@ -29,7 +31,7 @@ public sealed class IntervalGenerator
             .Select(x => x.Event)
             .ToList();
 
-        var candidates = MergeAdjacentKeepCandidates(BuildLinearKeepCandidates(sortedEvents, warnings))
+        var candidates = MergeAdjacentKeepCandidates(BuildLinearKeepCandidates(sortedEvents, manifest, options, warnings))
             .Select((c, index) => c with { Index = index })
             .ToList();
         var prepared = new List<PreparedClip>();
@@ -42,7 +44,7 @@ public sealed class IntervalGenerator
             var usesDynamicRoomEntryEnd = false;
             var usesDynamicLoadLevelStart = false;
             var usesDynamicLoadLevelEnd = false;
-            if (IsStandaloneRoomEntryLoad(candidate))
+            if (highIntensity && IsStandaloneRoomEntryLoad(candidate))
             {
                 var hasSample = TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var roomEntryDynamicEnd, out _);
                 if (hasSample)
@@ -56,14 +58,16 @@ public sealed class IntervalGenerator
                 }
             }
 
-            if (IsLoadLevelStart(timedCandidate) &&
+            if (highIntensity &&
+                IsLoadLevelStart(timedCandidate) &&
                 TryFindLoadLevelPlayerPositionBoundary(timedCandidate.Start, sortedEvents, out var dynamicStart))
             {
                 timedCandidate = timedCandidate with { Start = dynamicStart };
                 usesDynamicLoadLevelStart = true;
             }
 
-            if (!usesDynamicRoomEntryEnd &&
+            if (highIntensity &&
+                !usesDynamicRoomEntryEnd &&
                 IsLoadLevelEnd(timedCandidate) &&
                 TryFindLoadLevelPlayerPositionBoundary(timedCandidate.End, sortedEvents, out var dynamicEnd))
             {
@@ -209,9 +213,14 @@ public sealed class IntervalGenerator
         };
     }
 
-    private static List<ClipCandidate> BuildLinearKeepCandidates(IReadOnlyList<RoomEvent> events, List<string> warnings)
+    private static List<ClipCandidate> BuildLinearKeepCandidates(
+        IReadOnlyList<RoomEvent> events,
+        SessionManifest manifest,
+        IntervalGenerationOptions options,
+        List<string> warnings)
     {
         events = AddSyntheticRoomEnterForLoadPositionFallback(events);
+        var lowIntensity = !ClipIntensityModes.IsHigh(options.ClipIntensity);
         var result = new List<ClipCandidate>();
         var index = 0;
         var i = 0;
@@ -251,7 +260,7 @@ public sealed class IntervalGenerator
             }
             else if (!IsRoomEntry(e))
             {
-                if (IsExitLike(e) || IsSessionEnd(e) || IsPlayerPositionSample(e))
+                if (IsExitLike(e) || IsSessionEnd(e) || IsPlayerPositionSample(e) || IsInteractionEvent(e))
                 {
                     i++;
                     continue;
@@ -270,7 +279,7 @@ public sealed class IntervalGenerator
                     break;
                 }
 
-                if (IsPlayerPositionSample(events[i]))
+                if (IsPlayerPositionSample(events[i]) || IsInteractionEvent(events[i]))
                 {
                     i++;
                     continue;
@@ -297,6 +306,8 @@ public sealed class IntervalGenerator
                 RoomEvent? checkpointDeathLoad = null;
                 RoomEvent? checkpointDeathSuccessStart = null;
                 RoomEvent? pendingCheckpointDeath = null;
+                var sawDeathAfterRoomEntry = false;
+                var lowTailEmitted = false;
                 var sessionDone = false;
 
                 void FlushPendingCheckpointDeathWarning()
@@ -314,7 +325,7 @@ public sealed class IntervalGenerator
                 while (i < events.Count)
                 {
                     var current = events[i];
-                    if (IsPlayerPositionSample(current))
+                    if (IsPlayerPositionSample(current) || IsInteractionEvent(current))
                     {
                         i++;
                         continue;
@@ -349,7 +360,13 @@ public sealed class IntervalGenerator
                     {
                         FlushPendingCheckpointDeathWarning();
                         EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
-                        if (activeLoad is not null)
+                        if (lowIntensity && activeLoad is not null && !sawDeathAfterRoomEntry)
+                        {
+                            RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
+                            AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "low_load_to_exit", false);
+                            lowTailEmitted = true;
+                        }
+                        else if (activeLoad is not null)
                         {
                             warnings.Add(DiscardWarning("linear_discard_load_to_exit", current));
                         }
@@ -361,6 +378,7 @@ public sealed class IntervalGenerator
 
                     if (current.EventType is "death")
                     {
+                        sawDeathAfterRoomEntry = true;
                         if (activeLoad is not null && level.Matches(current))
                         {
                             checkpointDeathLoad = activeLoad;
@@ -480,8 +498,26 @@ public sealed class IntervalGenerator
                 // OBS recording can be stopped while the game is still inside the
                 // room, so no exit/session-end event may arrive. Keep the final
                 // matched room_enter -> load_level intro as a real clip instead
-                // of requiring a terminal exit signal.
-                EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
+                // of requiring a terminal exit signal. Low intensity deliberately
+                // keeps the final in-room tail from load_level to recording end.
+                if (lowTailEmitted)
+                {
+                    // The low-intensity exit branch intentionally replaced the
+                    // intro-only candidate with load_level -> exit.
+                }
+                else if (lowIntensity &&
+                    !sessionDone &&
+                    activeLoad is not null &&
+                    !sawDeathAfterRoomEntry &&
+                    TryCreateRecordingEndEvent(activeLoad, manifest, out var recordingEnd))
+                {
+                    RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
+                    AddCandidate(result, ref index, activeLoad, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_load_to_recording_end", false);
+                }
+                else
+                {
+                    EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
+                }
 
                 if (sessionDone)
                 {
@@ -577,7 +613,7 @@ public sealed class IntervalGenerator
                 continue;
             }
 
-            if (IsPlayerPositionSample(current))
+            if (IsPlayerPositionSample(current) || IsInteractionEvent(current))
             {
                 if (IsSyntheticLoadPositionRoomEnter(roomEnter) && SameMapAndRoom(roomEnter, current))
                 {
@@ -633,7 +669,7 @@ public sealed class IntervalGenerator
         for (var i = searchStart; i < events.Count; i++)
         {
             var current = events[i];
-            if (IsPlayerPositionSample(current))
+            if (IsPlayerPositionSample(current) || IsInteractionEvent(current))
             {
                 continue;
             }
@@ -682,7 +718,7 @@ public sealed class IntervalGenerator
         while (i < events.Count)
         {
             var current = events[i];
-            if (IsPlayerPositionSample(current))
+            if (IsPlayerPositionSample(current) || IsInteractionEvent(current))
             {
                 i++;
                 continue;
@@ -725,7 +761,7 @@ public sealed class IntervalGenerator
         while (i < events.Count)
         {
             var current = events[i];
-            if (IsPlayerPositionSample(current))
+            if (IsPlayerPositionSample(current) || IsInteractionEvent(current))
             {
                 i++;
                 continue;
@@ -768,7 +804,7 @@ public sealed class IntervalGenerator
         while (i < events.Count)
         {
             var current = events[i];
-            if (IsPlayerPositionSample(current))
+            if (IsPlayerPositionSample(current) || IsInteractionEvent(current))
             {
                 i++;
                 continue;
@@ -875,6 +911,83 @@ public sealed class IntervalGenerator
             intro.Entry.MapSid ?? intro.InitialCheckpoint.MapSid,
             "room_entry_load",
             isCheckpointIntro: true);
+    }
+
+    private static void RemoveRoomEntryIntroCandidate(List<ClipCandidate> result, RoomIntro intro)
+    {
+        for (var i = result.Count - 1; i >= 0; i--)
+        {
+            var candidate = result[i];
+            if (ReferenceEquals(candidate.Start, intro.Entry) &&
+                ReferenceEquals(candidate.End, intro.InitialCheckpoint) &&
+                string.Equals(candidate.BaseValidReason, "room_entry_load", StringComparison.Ordinal))
+            {
+                result.RemoveAt(i);
+                return;
+            }
+        }
+    }
+
+    private static bool TryCreateRecordingEndEvent(RoomEvent activeLoad, SessionManifest manifest, out RoomEvent recordingEnd)
+    {
+        recordingEnd = activeLoad;
+        var candidateRecordings = manifest.Recordings
+            .Select(recording =>
+            {
+                var anchors = recording.Anchors.OrderBy(a => a.Utc).ToList();
+                var firstUtc = anchors.FirstOrDefault()?.Utc ?? recording.StartUtc;
+                var lastUtc = anchors.LastOrDefault()?.Utc ?? recording.EndUtc;
+                return new { Recording = recording, FirstUtc = firstUtc, LastUtc = lastUtc, Anchors = anchors };
+            })
+            .Where(x => x.FirstUtc.HasValue && x.LastUtc.HasValue &&
+                        x.FirstUtc.Value <= activeLoad.Utc && activeLoad.Utc <= x.LastUtc.Value)
+            .OrderBy(x => x.LastUtc)
+            .ToList();
+
+        var selected = candidateRecordings.FirstOrDefault()
+            ?? manifest.Recordings
+                .Select(recording =>
+                {
+                    var anchors = recording.Anchors.OrderBy(a => a.Utc).ToList();
+                    var lastUtc = anchors.LastOrDefault()?.Utc ?? recording.EndUtc;
+                    return new { Recording = recording, FirstUtc = recording.StartUtc, LastUtc = lastUtc, Anchors = anchors };
+                })
+                .Where(x => x.LastUtc.HasValue && x.LastUtc.Value > activeLoad.Utc)
+                .OrderBy(x => x.LastUtc)
+                .FirstOrDefault();
+
+        if (selected is null)
+        {
+            return false;
+        }
+
+        var endAnchor = selected.Anchors
+            .OrderBy(a => a.OutputDurationMs)
+            .ThenBy(a => a.Utc)
+            .LastOrDefault();
+        var endUtc = endAnchor?.Utc ?? selected.Recording.EndUtc;
+        if (!endUtc.HasValue || endUtc.Value <= activeLoad.Utc)
+        {
+            return false;
+        }
+
+        recordingEnd = activeLoad with
+        {
+            EventType = "recording_end",
+            EventId = "synthetic-recording-end-" + activeLoad.EventId,
+            Utc = endUtc.Value,
+            Notes = AddSyntheticRecordingEndNote(activeLoad.Notes)
+        };
+        return true;
+    }
+
+    private static Dictionary<string, object?> AddSyntheticRecordingEndNote(Dictionary<string, object?>? notes)
+    {
+        var result = notes is null
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(notes);
+        result["syntheticBoundary"] = "recording_end";
+        return result;
     }
 
     private static bool IsSessionStart(RoomEvent e)
@@ -1279,23 +1392,49 @@ public sealed class IntervalGenerator
 
         RoomEvent? latestStationary = null;
         RoomEvent? bestByDistance = null;
+        RoomEvent? latestInteractionEnd = null;
+        RoomEvent? latestInteractionBoundary = null;
+        var interactionDepth = 0;
         var bestDistanceSquared = double.MaxValue;
         for (var i = loadIndex + 1; i < events.Count; i++)
         {
             var current = events[i];
+            if (IsInteractionStart(current))
+            {
+                interactionDepth++;
+                latestInteractionBoundary = current;
+                pendingInteractionReset();
+                continue;
+            }
+
+            if (IsInteractionEnd(current))
+            {
+                if (interactionDepth > 0)
+                {
+                    interactionDepth--;
+                }
+
+                latestInteractionEnd = current;
+                latestInteractionBoundary = current;
+                pendingInteractionReset();
+                continue;
+            }
+
             if (IsPlayerPositionSample(current))
             {
                 if (!SameMapAndRoom(candidate.End, current) ||
-                    !SampleBelongsToLoad(current, candidate.End))
+                    !SampleBelongsToLoad(current, candidate.End) ||
+                    interactionDepth > 0 ||
+                    (latestInteractionEnd is not null && current.Utc < latestInteractionEnd.Utc))
                 {
                     continue;
                 }
 
                 if (!hasSpawnPoint)
                 {
-                    dynamicEnd = current;
+                    bestByDistance ??= current;
                     dynamicEndIsStationary = IsStationaryPlayerPositionSample(current);
-                    return true;
+                    continue;
                 }
 
                 if (!TryGetPlayerPosition(current, out var position))
@@ -1334,11 +1473,24 @@ public sealed class IntervalGenerator
 
         if (bestByDistance is null)
         {
+            if (latestInteractionBoundary is not null)
+            {
+                dynamicEnd = latestInteractionBoundary;
+                return true;
+            }
+
             return false;
         }
 
         dynamicEnd = bestByDistance;
         return true;
+
+        void pendingInteractionReset()
+        {
+            latestStationary = null;
+            bestByDistance = null;
+            bestDistanceSquared = double.MaxValue;
+        }
     }
 
     private static bool IsStationaryPlayerPositionSample(RoomEvent sample)
@@ -1615,6 +1767,15 @@ public sealed class IntervalGenerator
 
     private static bool IsPlayerPositionSample(RoomEvent e)
         => string.Equals(e.EventType, "player_position_sample", StringComparison.Ordinal);
+
+    private static bool IsInteractionEvent(RoomEvent e)
+        => IsInteractionStart(e) || IsInteractionEnd(e);
+
+    private static bool IsInteractionStart(RoomEvent e)
+        => e.EventType is "telescope_start" or "dialog_start";
+
+    private static bool IsInteractionEnd(RoomEvent e)
+        => e.EventType is "telescope_end" or "dialog_end";
 
     private static void AddIntroCandidate(
         List<ClipCandidate> result,

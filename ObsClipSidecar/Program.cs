@@ -64,6 +64,7 @@ public static class Program
             PostRollMs = GetLong(values, "post-roll-ms", 500),
             MaxAllowedAnchorGapMs = GetLong(values, "max-anchor-gap-ms", 2_000),
             MaxAllowedCutErrorMs = GetLong(values, "max-cut-error-ms", 100),
+            ClipIntensity = ClipIntensityModes.Normalize(values.GetValueOrDefault("clip-intensity")),
             SplitOnPause = GetBool(values, "split-on-pause", true),
             RequireExistingFiles = GetBool(values, "require-existing-files", false)
         };
@@ -196,7 +197,7 @@ public static class Program
         Console.WriteLine("Commands:");
         Console.WriteLine("  self-test");
         Console.WriteLine("  build-session-manifest --obs-events obs_events.jsonl --out session_manifest.json [--session-id run1]");
-        Console.WriteLine("  generate-intervals --room-events room_events.jsonl --session-manifest session_manifest.json --out clip_intervals.json [--max-anchor-gap-ms 2000]");
+        Console.WriteLine("  generate-intervals --room-events room_events.jsonl --session-manifest session_manifest.json --out clip_intervals.json [--max-anchor-gap-ms 2000] [--clip-intensity high|low]");
         Console.WriteLine("  assemble-dry-run --clip-intervals clip_intervals.json --out-dir out [--fast-preview-copy false] [--final-output final_useful_run.mp4]");
         Console.WriteLine("  assemble --clip-intervals clip_intervals.json --out-dir out --ffmpeg C:\\tools\\ffmpeg.exe [--final-output final_useful_run.mp4]");
         Console.WriteLine("  append-room-event --path room_events.jsonl --event-type room_start --room a [--utc 2026-05-18T00:00:00Z]");

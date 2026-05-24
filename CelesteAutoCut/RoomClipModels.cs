@@ -46,6 +46,10 @@ internal static class RoomClipEventTypes {
     public const string Death = "death";
     public const string StrawberryCollect = "strawberry_collect";
     public const string PlayerPositionSample = "player_position_sample";
+    public const string TelescopeStart = "telescope_start";
+    public const string TelescopeEnd = "telescope_end";
+    public const string DialogStart = "dialog_start";
+    public const string DialogEnd = "dialog_end";
     public const string LevelComplete = "level_complete";
     public const string Exit = "exit";
     public const string SessionEnd = "session_end";

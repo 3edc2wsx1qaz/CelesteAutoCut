@@ -156,6 +156,19 @@ public sealed record IntervalGenerationOptions
     public long MaxAllowedCutErrorMs { get; init; } = 100;
     public bool SplitOnPause { get; init; } = true;
     public bool RequireExistingFiles { get; init; } = false;
+    public string ClipIntensity { get; init; } = ClipIntensityModes.High;
+}
+
+public static class ClipIntensityModes
+{
+    public const string High = "high";
+    public const string Low = "low";
+
+    public static string Normalize(string? value)
+        => string.Equals(value, Low, StringComparison.OrdinalIgnoreCase) ? Low : High;
+
+    public static bool IsHigh(string? value)
+        => string.Equals(Normalize(value), High, StringComparison.Ordinal);
 }
 
 public sealed record ClipIntervalsDocument

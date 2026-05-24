@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using Celeste;
 using Celeste.Mod;
@@ -34,6 +35,11 @@ public sealed class CelesteAutoCutModule : EverestModule {
         On.Celeste.Level.LoadLevel += OnLevelLoadLevel;
         On.Celeste.Level.Update += OnLevelUpdate;
         On.Celeste.Strawberry.OnCollect += OnStrawberryCollect;
+        On.Celeste.Lookout.Interact += OnLookoutInteract;
+        On.Celeste.Lookout.StopInteracting += OnLookoutStopInteracting;
+        On.Celeste.Textbox.Say += OnTextboxSay;
+        On.Celeste.MiniTextbox.ctor += OnMiniTextboxCtor;
+        On.Celeste.MiniTextbox.Close += OnMiniTextboxClose;
         Everest.Events.Player.OnDie += OnPlayerDie;
     }
 
@@ -42,6 +48,11 @@ public sealed class CelesteAutoCutModule : EverestModule {
         On.Celeste.Level.LoadLevel -= OnLevelLoadLevel;
         On.Celeste.Level.Update -= OnLevelUpdate;
         On.Celeste.Strawberry.OnCollect -= OnStrawberryCollect;
+        On.Celeste.Lookout.Interact -= OnLookoutInteract;
+        On.Celeste.Lookout.StopInteracting -= OnLookoutStopInteracting;
+        On.Celeste.Textbox.Say -= OnTextboxSay;
+        On.Celeste.MiniTextbox.ctor -= OnMiniTextboxCtor;
+        On.Celeste.MiniTextbox.Close -= OnMiniTextboxClose;
         Everest.Events.Player.OnDie -= OnPlayerDie;
         controller.Stop();
         roomClipRecorder.Shutdown();
@@ -62,6 +73,48 @@ public sealed class CelesteAutoCutModule : EverestModule {
         orig(self);
 
         roomClipRecorder.OnStrawberryCollect(self);
+    }
+
+    private void OnLookoutInteract(On.Celeste.Lookout.orig_Interact orig, Lookout self, Player player) {
+        roomClipRecorder.OnInteractionStart(self.SceneAs<Level>(), RoomClipEventTypes.TelescopeStart, "lookout");
+        orig(self, player);
+    }
+
+    private void OnLookoutStopInteracting(On.Celeste.Lookout.orig_StopInteracting orig, Lookout self) {
+        orig(self);
+        roomClipRecorder.OnInteractionEnd(self.SceneAs<Level>(), RoomClipEventTypes.TelescopeEnd, "lookout");
+    }
+
+    private IEnumerator OnTextboxSay(On.Celeste.Textbox.orig_Say orig, string dialog, params Func<IEnumerator>[] events) {
+        roomClipRecorder.OnInteractionStart(CurrentLevel(), RoomClipEventTypes.DialogStart, "textbox");
+        IEnumerator? routine = null;
+        try {
+            routine = orig(dialog, events);
+            while (routine.MoveNext()) {
+                yield return routine.Current;
+            }
+        } finally {
+            (routine as IDisposable)?.Dispose();
+            roomClipRecorder.OnInteractionEnd(CurrentLevel(), RoomClipEventTypes.DialogEnd, "textbox");
+        }
+    }
+
+    private void OnMiniTextboxCtor(On.Celeste.MiniTextbox.orig_ctor orig, MiniTextbox self, string dialogId) {
+        orig(self, dialogId);
+        roomClipRecorder.OnInteractionStart(CurrentLevel(), RoomClipEventTypes.DialogStart, "mini_textbox");
+    }
+
+    private IEnumerator OnMiniTextboxClose(On.Celeste.MiniTextbox.orig_Close orig, MiniTextbox self) {
+        IEnumerator? routine = null;
+        try {
+            routine = orig(self);
+            while (routine.MoveNext()) {
+                yield return routine.Current;
+            }
+        } finally {
+            (routine as IDisposable)?.Dispose();
+            roomClipRecorder.OnInteractionEnd(self.SceneAs<Level>() ?? CurrentLevel(), RoomClipEventTypes.DialogEnd, "mini_textbox");
+        }
     }
 
     private void OnMInputUpdate(On.Monocle.MInput.orig_Update orig) {
@@ -98,6 +151,9 @@ public sealed class CelesteAutoCutModule : EverestModule {
             observedLevelSceneLastFrame = false;
         }
     }
+
+    private static Level? CurrentLevel()
+        => Engine.Scene as Level;
 
     [Command("replay_room_clip_reset", "Delete CelesteAutoCut room clip event logs.")]
     private static void CommandRoomClipReset() {
