@@ -12,7 +12,6 @@ public sealed class IntervalGenerator
         options ??= new IntervalGenerationOptions();
         options = options with { ClipIntensity = ClipIntensityModes.Normalize(options.ClipIntensity) };
         var highIntensity = ClipIntensityModes.IsHigh(options.ClipIntensity);
-        var lowIntensity = !highIntensity;
         var warnings = new List<string>();
         if (!manifest.Capabilities.SupportsOutputDurationAnchors)
         {
@@ -45,14 +44,7 @@ public sealed class IntervalGenerator
             var usesDynamicRoomEntryEnd = false;
             var usesDynamicLoadLevelStart = false;
             var usesDynamicLoadLevelEnd = false;
-            if (lowIntensity && IsStandaloneRoomEntryLoad(candidate))
-            {
-                if (TryFindRoomEntryDeathReloadEnd(sortedEvents, candidate.End, null, out var reloadEnd))
-                {
-                    timedCandidate = candidate with { End = reloadEnd, BaseValidReason = "room_entry_load_death_reload" };
-                }
-            }
-            else if (highIntensity && IsStandaloneRoomEntryLoad(candidate))
+            if (highIntensity && IsStandaloneRoomEntryLoad(candidate))
             {
                 var hasSample = TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var roomEntryDynamicEnd, out _);
                 if (hasSample)
@@ -316,6 +308,7 @@ public sealed class IntervalGenerator
                 RoomEvent? pendingCheckpointDeath = null;
                 var sawDeathAfterRoomEntry = false;
                 var lowTailEmitted = false;
+                var matchedRoomBoundary = false;
                 var sessionDone = false;
 
                 void FlushPendingCheckpointDeathWarning()
@@ -368,10 +361,18 @@ public sealed class IntervalGenerator
                     {
                         FlushPendingCheckpointDeathWarning();
                         EnsureRoomEntryIntroCandidate(result, ref index, roomEntryIntro);
-                        if (lowIntensity && activeLoad is not null && !sawDeathAfterRoomEntry)
+                        if (lowIntensity && activeLoad is not null)
                         {
-                            RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
-                            AddCandidate(result, ref index, roomEntryIntro.Entry, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "low_room_entry_to_exit", false);
+                            if (sawDeathAfterRoomEntry)
+                            {
+                                AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "low_load_to_exit", false);
+                            }
+                            else
+                            {
+                                RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
+                                AddCandidate(result, ref index, roomEntryIntro.Entry, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "low_room_entry_to_exit", false);
+                            }
+
                             lowTailEmitted = true;
                         }
                         else if (activeLoad is not null)
@@ -448,6 +449,7 @@ public sealed class IntervalGenerator
                             var reason = checkpointDeathSuccessStart is null ? "final_successful_attempt" : "checkpoint_death_successful_attempt";
                             AddCandidate(result, ref index, successStart, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, reason, false);
                             pendingCheckpointDeath = null;
+                            matchedRoomBoundary = true;
                             i++;
                             KeepTransitionTail(events, ref i, current, warnings, result, ref index);
                             break;
@@ -464,6 +466,7 @@ public sealed class IntervalGenerator
                         if (activeLoad is not null && level.Matches(current))
                         {
                             AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "strawberry_collect_success", false);
+                            matchedRoomBoundary = true;
                             i++;
                             var endedSession = KeepStrawberryTail(events, ref i, current, warnings, result, ref index);
                             if (endedSession)
@@ -515,12 +518,20 @@ public sealed class IntervalGenerator
                 }
                 else if (lowIntensity &&
                     !sessionDone &&
+                    !matchedRoomBoundary &&
+                    i >= events.Count &&
                     activeLoad is not null &&
-                    !sawDeathAfterRoomEntry &&
                     TryCreateRecordingEndEvent(activeLoad, manifest, out var recordingEnd))
                 {
-                    RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
-                    AddCandidate(result, ref index, roomEntryIntro.Entry, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_room_entry_to_recording_end", false);
+                    if (sawDeathAfterRoomEntry)
+                    {
+                        AddCandidate(result, ref index, activeLoad, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_load_to_recording_end", false);
+                    }
+                    else
+                    {
+                        RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
+                        AddCandidate(result, ref index, roomEntryIntro.Entry, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_room_entry_to_recording_end", false);
+                    }
                 }
                 else
                 {

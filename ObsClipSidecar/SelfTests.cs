@@ -49,8 +49,9 @@ public static class SelfTests
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("interrupted recording keeps final room-entry intro without exit", InterruptedRecordingKeepsFinalRoomEntryIntroWithoutExit),
             ("low intensity keeps load timestamps", LowIntensityKeepsLoadTimestamps),
-            ("low intensity death reload beats entry sample", LowIntensityDeathReloadBeatsEntrySample),
-            ("low intensity death reload has unlimited window", LowIntensityDeathReloadHasUnlimitedWindow),
+            ("low intensity death reload keeps entry and resumes at reload", LowIntensityDeathReloadKeepsEntryAndResumesAtReload),
+            ("low intensity death reload resume has unlimited window", LowIntensityDeathReloadResumeHasUnlimitedWindow),
+            ("low intensity death reload exit keeps entry and reload tail", LowIntensityDeathReloadExitKeepsEntryAndReloadTail),
             ("low intensity final load keeps exit tail", LowIntensityFinalLoadKeepsExitTail),
             ("low intensity final load keeps recording end tail", LowIntensityFinalLoadKeepsRecordingEndTail),
             ("high intensity interaction delays room entry sample", HighIntensityInteractionDelaysRoomEntrySample),
@@ -1125,12 +1126,12 @@ public static class SelfTests
 
         var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
-        var success = doc.Clips.Single(c => c.Reasons.Contains("final_successful_attempt"));
+        var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
         Assert(success.StartUtc == respawnLoad, "low intensity should keep load_level timestamp instead of player_position_sample timestamp");
         Assert(!success.Reasons.Contains("load_level_player_position_start"), "low intensity should not annotate dynamic load start");
     }
 
-    private static void LowIntensityDeathReloadBeatsEntrySample()
+    private static void LowIntensityDeathReloadKeepsEntryAndResumesAtReload()
     {
         var start = BaseUtc.AddSeconds(2);
         var load = start.AddMilliseconds(200);
@@ -1151,13 +1152,16 @@ public static class SelfTests
 
         var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
-        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_death_reload"));
-        Assert(intro is not null, "low intensity should prefer death-reload for room entry when a death/reload exists");
-        Assert(intro!.EndUtc == respawnLoad, "low intensity death-reload should end at the reload load_level timestamp, not a player sample");
-        Assert(!intro.Reasons.Contains("load_level_player_position_end"), "low intensity should not annotate dynamic load_level end boundaries");
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == load);
+        Assert(intro is not null, "low intensity should keep the original room_enter -> first load_level entry segment across death/reload");
+        Assert(!intro!.Reasons.Contains("room_entry_load_death_reload"), "low intensity should not replace the entry segment with death-reload");
+
+        var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
+        Assert(success.StartUtc == respawnLoad && success.EndUtc == clear, "low intensity should resume later matching from the reload load_level");
+        Assert(!success.Reasons.Contains("load_level_player_position_start"), "low intensity should not rewrite reload load_level to player sample time");
     }
 
-    private static void LowIntensityDeathReloadHasUnlimitedWindow()
+    private static void LowIntensityDeathReloadResumeHasUnlimitedWindow()
     {
         var start = BaseUtc.AddSeconds(2);
         var load = start.AddMilliseconds(200);
@@ -1175,9 +1179,34 @@ public static class SelfTests
 
         var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
-        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.Reasons.Contains("room_entry_load_death_reload"));
-        Assert(intro is not null, "low intensity death-reload fallback should not be limited to the high-intensity five-second window");
-        Assert(intro!.EndUtc == respawnLoad, "low intensity unlimited death-reload should end at the reload load_level");
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == load);
+        Assert(intro is not null, "low intensity should still keep the entry segment when death is outside the high fallback window");
+
+        var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
+        Assert(success.StartUtc == respawnLoad && success.EndUtc == clear, "low intensity reload matching should not be limited to the high-intensity five-second fallback window");
+    }
+
+    private static void LowIntensityDeathReloadExitKeepsEntryAndReloadTail()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(200);
+        var respawnLoad = start.AddSeconds(1);
+        var exit = start.AddSeconds(2);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "death", Utc = start.AddMilliseconds(700), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) },
+            new() { EventType = "exit", Utc = exit, Room = "a", MapSid = "map" }
+        };
+
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
+
+        Assert(doc.Clips.Any(c => c.StartUtc == start && c.EndUtc == load), "low intensity should keep the room entry intro before a death/reload exit tail");
+        var tail = doc.Clips.SingleOrDefault(c => c.StartUtc == respawnLoad && c.EndUtc == exit);
+        Assert(tail is not null, "low intensity should match the later exit tail from the reload load_level");
+        Assert(tail!.Reasons.Contains("low_load_to_exit"), "death/reload exit tail should use the reload load_level tail reason");
     }
 
     private static void LowIntensityFinalLoadKeepsExitTail()
