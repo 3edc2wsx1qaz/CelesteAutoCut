@@ -12,6 +12,7 @@ public sealed class IntervalGenerator
         options ??= new IntervalGenerationOptions();
         options = options with { ClipIntensity = ClipIntensityModes.Normalize(options.ClipIntensity) };
         var highIntensity = ClipIntensityModes.IsHigh(options.ClipIntensity);
+        var lowIntensity = !highIntensity;
         var warnings = new List<string>();
         if (!manifest.Capabilities.SupportsOutputDurationAnchors)
         {
@@ -44,7 +45,14 @@ public sealed class IntervalGenerator
             var usesDynamicRoomEntryEnd = false;
             var usesDynamicLoadLevelStart = false;
             var usesDynamicLoadLevelEnd = false;
-            if (highIntensity && IsStandaloneRoomEntryLoad(candidate))
+            if (lowIntensity && IsStandaloneRoomEntryLoad(candidate))
+            {
+                if (TryFindRoomEntryDeathReloadEnd(sortedEvents, candidate.End, null, out var reloadEnd))
+                {
+                    timedCandidate = candidate with { End = reloadEnd, BaseValidReason = "room_entry_load_death_reload" };
+                }
+            }
+            else if (highIntensity && IsStandaloneRoomEntryLoad(candidate))
             {
                 var hasSample = TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var roomEntryDynamicEnd, out _);
                 if (hasSample)
@@ -52,7 +60,7 @@ public sealed class IntervalGenerator
                     timedCandidate = candidate with { End = roomEntryDynamicEnd };
                     usesDynamicRoomEntryEnd = true;
                 }
-                else if (TryFindRoomEntryDeathReloadEnd(sortedEvents, candidate.End, out var reloadEnd))
+                else if (TryFindRoomEntryDeathReloadEnd(sortedEvents, candidate.End, RoomEntryDeathReloadWindow, out var reloadEnd))
                 {
                     timedCandidate = candidate with { End = reloadEnd, BaseValidReason = "room_entry_load_death_reload" };
                 }
@@ -363,7 +371,7 @@ public sealed class IntervalGenerator
                         if (lowIntensity && activeLoad is not null && !sawDeathAfterRoomEntry)
                         {
                             RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
-                            AddCandidate(result, ref index, activeLoad, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "low_load_to_exit", false);
+                            AddCandidate(result, ref index, roomEntryIntro.Entry, current, activeLoad.Room ?? current.Room ?? "room", activeLoad.MapSid ?? current.MapSid, "low_room_entry_to_exit", false);
                             lowTailEmitted = true;
                         }
                         else if (activeLoad is not null)
@@ -512,7 +520,7 @@ public sealed class IntervalGenerator
                     TryCreateRecordingEndEvent(activeLoad, manifest, out var recordingEnd))
                 {
                     RemoveRoomEntryIntroCandidate(result, roomEntryIntro);
-                    AddCandidate(result, ref index, activeLoad, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_load_to_recording_end", false);
+                    AddCandidate(result, ref index, roomEntryIntro.Entry, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_room_entry_to_recording_end", false);
                 }
                 else
                 {
@@ -646,6 +654,7 @@ public sealed class IntervalGenerator
     private static bool TryFindRoomEntryDeathReloadEnd(
         IReadOnlyList<RoomEvent> events,
         RoomEvent firstLoad,
+        TimeSpan? reloadWindow,
         out RoomEvent reloadLoad)
     {
         reloadLoad = firstLoad;
@@ -665,7 +674,7 @@ public sealed class IntervalGenerator
         }
 
         RoomEvent? death = null;
-        var windowEnd = firstLoad.Utc + RoomEntryDeathReloadWindow;
+        var windowEnd = reloadWindow.HasValue ? firstLoad.Utc + reloadWindow.Value : DateTimeOffset.MaxValue;
         for (var i = searchStart; i < events.Count; i++)
         {
             var current = events[i];
