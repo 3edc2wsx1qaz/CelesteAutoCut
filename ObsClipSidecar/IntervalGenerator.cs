@@ -250,6 +250,17 @@ public sealed class IntervalGenerator
                         break;
                     }
 
+                    if (lowIntensity && next.EventType is "load_level")
+                    {
+                        var syntheticRoomEnter = CreateSyntheticLoadPositionRoomEnter(next);
+                        var normalized = events.ToList();
+                        normalized.Insert(i, syntheticRoomEnter);
+                        events = normalized;
+                        AddCandidate(result, ref index, sessionStart, syntheticRoomEnter, syntheticRoomEnter.Room ?? sessionStart.Room ?? "room", syntheticRoomEnter.MapSid ?? sessionStart.MapSid, "session_intro", true);
+                        foundRoomEnter = true;
+                        break;
+                    }
+
                     if (IsSessionBoundary(next))
                     {
                         warnings.Add(DiscardWarning("linear_discard_missing_room_enter_after_session", sessionStart));
@@ -532,7 +543,10 @@ public sealed class IntervalGenerator
                 {
                     if (sawDeathAfterRoomEntry)
                     {
-                        AddCandidate(result, ref index, activeLoad, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_load_to_recording_end", false);
+                        if (!TryFindRoomEntryDeathReloadEnd(events, roomEntryIntro.InitialCheckpoint, null, out _))
+                        {
+                            AddCandidate(result, ref index, activeLoad, recordingEnd, activeLoad.Room ?? "room", activeLoad.MapSid, "low_load_to_recording_end", false);
+                        }
                     }
                     else
                     {
@@ -900,18 +914,18 @@ public sealed class IntervalGenerator
         }
 
         var fallback = events[fallbackIndex];
-        var syntheticRoomEnter = fallback with
-        {
-            EventType = "room_enter",
-            Utc = fallback.Utc,
-            EventId = "synthetic-room-enter-" + fallback.EventId,
-            Notes = AddSyntheticLoadPositionFallbackNote(fallback.Notes)
-        };
-
         var normalized = events.ToList();
-        normalized.Insert(fallbackIndex, syntheticRoomEnter);
+        normalized.Insert(fallbackIndex, CreateSyntheticLoadPositionRoomEnter(fallback));
         return normalized;
     }
+
+    private static RoomEvent CreateSyntheticLoadPositionRoomEnter(RoomEvent fallback) => fallback with
+    {
+        EventType = "room_enter",
+        Utc = fallback.Utc,
+        EventId = "synthetic-room-enter-" + fallback.EventId,
+        Notes = AddSyntheticLoadPositionFallbackNote(fallback.Notes)
+    };
 
     private static bool IsLoadPositionFallbackStart(RoomEvent e)
         => string.Equals(e.EventType, "load_level", StringComparison.Ordinal) ||

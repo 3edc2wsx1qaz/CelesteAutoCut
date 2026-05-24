@@ -49,12 +49,14 @@ public static class SelfTests
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("interrupted recording keeps final room-entry intro without exit", InterruptedRecordingKeepsFinalRoomEntryIntroWithoutExit),
             ("low intensity keeps load timestamps", LowIntensityKeepsLoadTimestamps),
+            ("low intensity session start falls back to first load level before later room enter", LowIntensitySessionStartFallsBackToFirstLoadLevelBeforeLaterRoomEnter),
             ("low intensity death reload keeps entry and resumes at reload", LowIntensityDeathReloadKeepsEntryAndResumesAtReload),
             ("low intensity death reload survives transition tail merge", LowIntensityDeathReloadSurvivesTransitionTailMerge),
             ("low intensity death reload resume has unlimited window", LowIntensityDeathReloadResumeHasUnlimitedWindow),
             ("low intensity death reload exit keeps entry and reload tail", LowIntensityDeathReloadExitKeepsEntryAndReloadTail),
             ("low intensity final load keeps exit tail", LowIntensityFinalLoadKeepsExitTail),
             ("low intensity final load keeps recording end tail", LowIntensityFinalLoadKeepsRecordingEndTail),
+            ("low intensity final death reload omits recording end tail", LowIntensityFinalDeathReloadOmitsRecordingEndTail),
             ("high intensity interaction delays room entry sample", HighIntensityInteractionDelaysRoomEntrySample),
             ("postroll at recording end is clamped", PostrollAtRecordingEndIsClamped),
             ("missing recording files invalidates clip", MissingRecordingFileMapping),
@@ -1132,6 +1134,37 @@ public static class SelfTests
         Assert(!success.Reasons.Contains("load_level_player_position_start"), "low intensity should not annotate dynamic load start");
     }
 
+    private static void LowIntensitySessionStartFallsBackToFirstLoadLevelBeforeLaterRoomEnter()
+    {
+        var sessionStart = BaseUtc.AddSeconds(1);
+        var load = BaseUtc.AddSeconds(2);
+        var respawnLoad = BaseUtc.AddSeconds(4);
+        var clear = BaseUtc.AddSeconds(5);
+        var laterSessionStart = BaseUtc.AddSeconds(7);
+        var laterRoomEnter = BaseUtc.AddSeconds(8);
+        var laterLoad = BaseUtc.AddSeconds(8.2);
+        var laterExit = BaseUtc.AddSeconds(9);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "session_start", Utc = sessionStart, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "death", Utc = BaseUtc.AddSeconds(3), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) },
+            new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "session_start", Utc = laterSessionStart, Room = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = laterRoomEnter, Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = laterLoad, Room = "b", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "exit", Utc = laterExit, Room = "b", MapSid = "map" }
+        };
+
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 12_000)] });
+
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == load && c.EndUtc == respawnLoad);
+        Assert(intro is not null, "low intensity should use the first load_level as synthetic [room_enter, load_level] when a session has no room_enter");
+        Assert(intro!.Reasons.Contains("room_entry_load_death_reload"), "the load-level fallback should still expand to the low death-reload entry segment");
+        Assert(doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc == clear), "matching should resume from the reload load_level after fallback entry");
+    }
+
     private static void LowIntensityDeathReloadKeepsEntryAndResumesAtReload()
     {
         var start = BaseUtc.AddSeconds(2);
@@ -1274,6 +1307,28 @@ public static class SelfTests
         Assert(doc.Clips.Count == 1, "low final recording-end tail should replace the intro-only clip");
         Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == BaseUtc.AddSeconds(10), "low final tail should keep room_enter -> recording end");
         Assert(doc.Clips[0].Reasons.Contains("low_room_entry_to_recording_end"), "low final tail should carry the low_room_entry_to_recording_end reason");
+    }
+
+    private static void LowIntensityFinalDeathReloadOmitsRecordingEndTail()
+    {
+        var start = BaseUtc.AddSeconds(2);
+        var load = start.AddMilliseconds(300);
+        var respawnLoad = start.AddSeconds(3);
+        var recording = Recording("r", BaseUtc, "run.mp4", 0, 10_000);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "room_enter", Utc = start, Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "death", Utc = start.AddSeconds(1), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) }
+        };
+
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [recording] });
+
+        Assert(doc.Clips.Count == 1, "low final death-reload should keep only the room_enter -> load_level -> death -> reload load_level segment");
+        Assert(doc.Clips[0].StartUtc == start && doc.Clips[0].EndUtc == respawnLoad, "low final death-reload should end at the reload load_level, not recording end");
+        Assert(doc.Clips[0].Reasons.Contains("room_entry_load_death_reload"), "low final death-reload should carry the death-reload reason");
+        Assert(!doc.Clips.Any(c => c.Reasons.Contains("low_load_to_recording_end")), "low final death-reload should not add a reload -> recording end tail");
     }
 
     private static void HighIntensityInteractionDelaysRoomEntrySample()
