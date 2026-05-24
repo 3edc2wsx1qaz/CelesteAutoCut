@@ -278,6 +278,14 @@ public sealed class IntervalGenerator
             }
             else if (!IsRoomEntry(e))
             {
+                if (lowIntensity && e.EventType is "load_level")
+                {
+                    var normalized = events.ToList();
+                    normalized.Insert(i, CreateSyntheticLoadPositionRoomEnter(e));
+                    events = normalized;
+                    continue;
+                }
+
                 if (IsExitLike(e) || IsSessionEnd(e) || IsPlayerPositionSample(e) || IsInteractionEvent(e))
                 {
                     i++;

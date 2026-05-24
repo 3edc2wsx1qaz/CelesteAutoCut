@@ -49,6 +49,7 @@ public static class SelfTests
             ("unfinished room keeps room-entry intro at end", UnfinishedRoomKeepsIntroAtEnd),
             ("interrupted recording keeps final room-entry intro without exit", InterruptedRecordingKeepsFinalRoomEntryIntroWithoutExit),
             ("low intensity keeps load timestamps", LowIntensityKeepsLoadTimestamps),
+            ("low intensity without session start falls back to first load level before room enter", LowIntensityWithoutSessionStartFallsBackToFirstLoadLevelBeforeRoomEnter),
             ("low intensity session start falls back to first load level before later room enter", LowIntensitySessionStartFallsBackToFirstLoadLevelBeforeLaterRoomEnter),
             ("low intensity death reload keeps entry and resumes at reload", LowIntensityDeathReloadKeepsEntryAndResumesAtReload),
             ("low intensity death reload survives transition tail merge", LowIntensityDeathReloadSurvivesTransitionTailMerge),
@@ -1132,6 +1133,33 @@ public static class SelfTests
         var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
         Assert(success.StartUtc == respawnLoad, "low intensity should keep load_level timestamp instead of player_position_sample timestamp");
         Assert(!success.Reasons.Contains("load_level_player_position_start"), "low intensity should not annotate dynamic load start");
+    }
+
+    private static void LowIntensityWithoutSessionStartFallsBackToFirstLoadLevelBeforeRoomEnter()
+    {
+        var load = BaseUtc.AddSeconds(2);
+        var respawnLoad = BaseUtc.AddSeconds(4);
+        var clear = BaseUtc.AddSeconds(5);
+        var laterRoomEnter = BaseUtc.AddSeconds(8);
+        var laterLoad = BaseUtc.AddSeconds(8.2);
+        var laterExit = BaseUtc.AddSeconds(9);
+        var events = new List<RoomEvent>
+        {
+            new() { EventType = "load_level", Utc = load, Room = "a", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "death", Utc = BaseUtc.AddSeconds(3), Room = "a", MapSid = "map" },
+            new() { EventType = "load_level", Utc = respawnLoad, Room = "a", MapSid = "map", Notes = SpawnNotes("Respawn", 100, 100) },
+            new() { EventType = "transition", Utc = clear, Room = "a", NextRoom = "b", MapSid = "map" },
+            new() { EventType = "room_enter", Utc = laterRoomEnter, Room = "b", MapSid = "map" },
+            new() { EventType = "load_level", Utc = laterLoad, Room = "b", MapSid = "map", Notes = SpawnNotes("Transition", 10, 10) },
+            new() { EventType = "exit", Utc = laterExit, Room = "b", MapSid = "map" }
+        };
+
+        var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 12_000)] });
+
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == load && c.EndUtc == respawnLoad);
+        Assert(intro is not null, "low intensity should synthesize [room_enter, load_level] from the first load_level before a later real room_enter when session_start is missing");
+        Assert(intro!.Reasons.Contains("room_entry_load_death_reload"), "the no-session load-level fallback should still expand to the low death-reload entry segment");
+        Assert(doc.Clips.Any(c => c.StartUtc == respawnLoad && c.EndUtc >= clear), "matching should resume from the reload load_level after no-session fallback entry");
     }
 
     private static void LowIntensitySessionStartFallsBackToFirstLoadLevelBeforeLaterRoomEnter()

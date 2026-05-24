@@ -131,7 +131,7 @@ E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 
 游戏内 Mod Options 和 OBS 面板里的 `剪辑强度` 默认为 `Low`：
 
-- `Low`：默认模式，线性匹配逻辑与 `High` 对齐，但所有 `load_level` 边界都直接使用原始 `load_level` 时间戳，不会改用 `player_position_sample`。每段会先按时间找 `session_start`，再找 `room_enter`；如果当前 session 没有 `room_enter`，就用第一个 `load_level` 合成 `[room_enter, load_level]` 入口继续匹配。`room_enter -> load_level -> death -> load_level` 会保留完整的 `room_enter -> first load_level -> death -> reload load_level` 进房死亡段；即使前一段 `transition -> room_enter` 紧贴当前进房，也不会把这个进房死亡段合并掉。非最终房间会从 reload `load_level` 继续匹配后续成功/exit/录制末尾片段；如果最后一段也能匹配 `room_enter -> load_level -> death -> reload load_level`，则只保留这整段，不再追加 `reload -> 录制末尾`。这个 death->reload 后续匹配不限制 death 距离初始 load 的时间窗口。最后一个未死亡的未通关进房段会保留 `room_enter -> exit`，没有 `exit` 时保留 `room_enter -> 录制末尾`。
+- `Low`：默认模式，线性匹配逻辑与 `High` 对齐，但所有 `load_level` 边界都直接使用原始 `load_level` 时间戳，不会改用 `player_position_sample`。每段会先按时间找 `session_start`，再找 `room_enter`；如果当前 session 没有 `room_enter`，或没有 `session_start` 且在第一个真实 `room_enter` 前先遇到 `load_level`，就用这个 `load_level` 合成 `[room_enter, load_level]` 入口继续匹配。`room_enter -> load_level -> death -> load_level` 会保留完整的 `room_enter -> first load_level -> death -> reload load_level` 进房死亡段；即使前一段 `transition -> room_enter` 紧贴当前进房，也不会把这个进房死亡段合并掉。非最终房间会从 reload `load_level` 继续匹配后续成功/exit/录制末尾片段；如果最后一段也能匹配 `room_enter -> load_level -> death -> reload load_level`，则只保留这整段，不再追加 `reload -> 录制末尾`。这个 death->reload 后续匹配不限制 death 距离初始 load 的时间窗口。最后一个未死亡的未通关进房段会保留 `room_enter -> exit`，没有 `exit` 时保留 `room_enter -> 录制末尾`。
 - `High`：使用精确规则。`load_level` 边界会优先用对应的 `player_position_sample` 时间戳微调；进房后如果检测到望远镜或对话事件，会先保留 `load_level -> 望远镜/对话` 这段，并在望远镜/对话结束后重新开始进房采样。
 
 命令行生成 intervals 时也可以传：
