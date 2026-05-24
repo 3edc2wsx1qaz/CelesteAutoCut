@@ -124,21 +124,10 @@ E:\obs_video\Cabob\2026-05-19 20-31-08.mp4
 | 选项 | 说明 |
 | --- | --- |
 | `Output Directory` / `输出目录` | 最终剪辑视频的输出根目录。留空时使用 OBS 录制目录。每张地图仍会输出到对应地图名子文件夹。 |
-| `Clip Intensity` / `剪辑强度` | 默认 `Low`。选择 `Low` 使用原始 `load_level` 时间戳、保留完整 `room_enter -> load_level -> death -> reload` 进房死亡段、与 High 一致地从 reload 继续后续匹配，并保留更宽松的最终进房尾段；选择 `High` 使用精确 player-position 切点和望远镜/对话后的进房采样。 |
+| `Clip Intensity` / `剪辑强度` | 默认 `Low`。选择 `Low` 使用原始 `load_level` 时间戳、保留完整第一次死亡段，并保留更宽松的最终进房尾段；选择 `High` 会用采样算法剪掉第一次死亡，但可能会导致人物动作不连续 |
 | `Output Logs` / `输出日志` | 默认关闭。开启后会保留 room event、OBS event、clip intervals、片段选择、assembly 报告、ffconcat 和 helper stdout/stderr 日志，方便排查问题。关闭时成功生成最终视频后，会清理所有匹配的 `room_event_*.jsonl`、helper stdout/stderr 以及本次 `obs_auto/sessions/<session-id>/` 工作目录。 |
 
-## 剪辑强度
 
-游戏内 Mod Options 和 OBS 面板里的 `剪辑强度` 默认为 `Low`：
-
-- `Low`：默认模式，线性匹配逻辑与 `High` 对齐，但所有 `load_level` 边界都直接使用原始 `load_level` 时间戳，不会改用 `player_position_sample`。每段会先按时间找 `session_start`，再找 `room_enter`；如果当前 session 没有 `room_enter`，或没有 `session_start` 且在第一个真实 `room_enter` 前先遇到 `load_level`，就用这个 `load_level` 合成 `[room_enter, load_level]` 入口继续匹配。`room_enter -> load_level -> death -> load_level` 会保留完整的 `room_enter -> first load_level -> death -> reload load_level` 进房死亡段；即使前一段 `transition -> room_enter` 紧贴当前进房，也不会把这个进房死亡段合并掉。非最终房间会从 reload `load_level` 继续匹配后续成功/exit/录制末尾片段；如果最后一段也能匹配 `room_enter -> load_level -> death -> reload load_level`，则只保留这整段，不再追加 `reload -> 录制末尾`。这个 death->reload 后续匹配不限制 death 距离初始 load 的时间窗口。最后一个未死亡的未通关进房段会保留 `room_enter -> exit`，没有 `exit` 时保留 `room_enter -> 录制末尾`。
-- `High`：使用精确规则。没有 `session_start` 且在第一个真实 `room_enter` 前先遇到 `load_level` 时，也会用这个 `load_level` 合成 `[room_enter, load_level]` 入口。`load_level` 边界会优先用对应的 `player_position_sample` 时间戳微调；进房后如果检测到望远镜或对话事件，会先保留 `load_level -> 望远镜/对话` 这段，并在望远镜/对话结束后重新开始进房采样。
-
-命令行生成 intervals 时也可以传：
-
-```powershell
-..\.dotnet\dotnet.exe run --project .\ObsClipSidecar\ObsClipSidecar.csproj -- generate-intervals --room-events room_events.jsonl --session-manifest session_manifest.json --out clip_intervals.json --clip-intensity low
-```
 
 ## 中间文件和日志
 
