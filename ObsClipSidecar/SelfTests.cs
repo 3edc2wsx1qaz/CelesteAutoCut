@@ -1152,9 +1152,10 @@ public static class SelfTests
 
         var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
-        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == load);
-        Assert(intro is not null, "low intensity should keep the original room_enter -> first load_level entry segment across death/reload");
-        Assert(!intro!.Reasons.Contains("room_entry_load_death_reload"), "low intensity should not replace the entry segment with death-reload");
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == respawnLoad);
+        Assert(intro is not null, "low intensity should keep the whole room_enter -> load_level -> death -> reload load_level segment");
+        Assert(intro!.Reasons.Contains("room_entry_load_death_reload"), "low death-reload entry segment should carry the death-reload reason");
+        Assert(!intro.Reasons.Contains("load_level_player_position_end"), "low death-reload entry should end at the reload load_level timestamp, not the reload player sample");
 
         var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
         Assert(success.StartUtc == respawnLoad && success.EndUtc == clear, "low intensity should resume later matching from the reload load_level");
@@ -1179,8 +1180,9 @@ public static class SelfTests
 
         var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
-        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == load);
-        Assert(intro is not null, "low intensity should still keep the entry segment when death is outside the high fallback window");
+        var intro = doc.Clips.SingleOrDefault(c => c.StartUtc == start && c.EndUtc == respawnLoad);
+        Assert(intro is not null, "low intensity should keep the whole death-reload entry segment even when death is outside the high fallback window");
+        Assert(intro!.Reasons.Contains("room_entry_load_death_reload"), "unlimited low death-reload segment should carry the death-reload reason");
 
         var success = doc.Clips.Single(c => c.StartUtc == respawnLoad && c.EndUtc == clear);
         Assert(success.StartUtc == respawnLoad && success.EndUtc == clear, "low intensity reload matching should not be limited to the high-intensity five-second fallback window");
@@ -1203,7 +1205,7 @@ public static class SelfTests
 
         var doc = GenerateLow(events, new SessionManifest { SessionId = "s", Recordings = [Recording("r", BaseUtc, "run.mp4", 0, 10_000)] });
 
-        Assert(doc.Clips.Any(c => c.StartUtc == start && c.EndUtc == load), "low intensity should keep the room entry intro before a death/reload exit tail");
+        Assert(doc.Clips.Any(c => c.StartUtc == start && c.EndUtc == respawnLoad && c.Reasons.Contains("room_entry_load_death_reload")), "low intensity should keep the whole room_enter -> load_level -> death -> reload segment before a death/reload exit tail");
         var tail = doc.Clips.SingleOrDefault(c => c.StartUtc == respawnLoad && c.EndUtc == exit);
         Assert(tail is not null, "low intensity should match the later exit tail from the reload load_level");
         Assert(tail!.Reasons.Contains("low_load_to_exit"), "death/reload exit tail should use the reload load_level tail reason");

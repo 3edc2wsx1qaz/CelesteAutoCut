@@ -44,7 +44,14 @@ public sealed class IntervalGenerator
             var usesDynamicRoomEntryEnd = false;
             var usesDynamicLoadLevelStart = false;
             var usesDynamicLoadLevelEnd = false;
-            if (highIntensity && IsStandaloneRoomEntryLoad(candidate))
+            if (!highIntensity && IsStandaloneRoomEntryLoad(candidate))
+            {
+                if (TryFindRoomEntryDeathReloadEnd(sortedEvents, candidate.End, null, out var reloadEnd))
+                {
+                    timedCandidate = candidate with { End = reloadEnd, BaseValidReason = "room_entry_load_death_reload" };
+                }
+            }
+            else if (highIntensity && IsStandaloneRoomEntryLoad(candidate))
             {
                 var hasSample = TryFindRoomEntryLoadPlayerPositionEnd(candidate, sortedEvents, out var roomEntryDynamicEnd, out _);
                 if (hasSample)
